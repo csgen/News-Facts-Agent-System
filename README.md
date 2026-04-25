@@ -234,6 +234,37 @@ news_facts_system/
 
 ---
 
+## Public API for teammates: `decompose_input`
+
+`scraper_preprocessing_memory` exposes a single function teammates can call to
+push any user-supplied input (URL, article text, or short claim) into Neo4j +
+ChromaDB and get back the resulting `claim_id`s:
+
+```python
+from src.preprocessing.decompose import decompose_input
+
+claim_ids = decompose_input("Trump claims peace with Iran today.")
+claim_ids = decompose_input("https://www.bbc.com/news/articles/c62lp853214o")
+claim_ids = decompose_input(article_text_pasted_by_user)  # any length
+
+# → list[str], e.g. ["clm_a3f8b2c1", ...]
+```
+
+**Behaviour:**
+- **URL** → fetched as clean markdown via Jina Reader, then run through the same preprocessing pipeline as scraped articles.
+- **Article text** (≥500 chars or ≥2 sentences) → `gpt-4o-mini` infers / generates a title + body split, then full preprocessing.
+- **Short claim** → wrapped as a synthetic single-claim article so entity extraction still runs.
+- **Idempotent** — re-calling with the same input returns the same `claim_id`s (matched by content hash).
+- **Failure** — URLs that Jina cannot read raise `URLFetchError`; callers should catch and surface a clear message.
+
+Optional env vars (in `.env`):
+```
+JINA_READER_BASE_URL=https://r.jina.ai/   # default
+JINA_API_KEY=                              # leave blank for free tier; set for higher rate limits
+```
+
+---
+
 ## Troubleshooting
 
 - **Streamlit can't connect to Neo4j** — verify `NEO4J_URI` in `.env` matches the mode.

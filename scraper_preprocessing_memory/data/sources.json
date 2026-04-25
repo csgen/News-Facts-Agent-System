@@ -54,5 +54,12 @@
     "domain": "reddit.com",
     "category": "social_media",
     "base_credibility": 0.25
+  },
+  {
+    "source_id": "src_frontend_local",
+    "name": "Frontend User Input",
+    "domain": "frontend.local",
+    "category": "user_input",
+    "base_credibility": 0.5
   }
 ]

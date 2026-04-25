@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # EnsembleData API (Reddit keyword search)
     ensembledata_api_token: str = ""
 
+    # Jina Reader (URL → markdown for decompose_input)
+    # Free endpoint is rate-limited; set jina_api_key for higher limits.
+    jina_reader_base_url: str = "https://r.jina.ai/"
+    jina_api_key: str = ""
+
     # Model settings
     embedding_model: str = "gemini-embedding-001"
     embedding_dim: int = 1536

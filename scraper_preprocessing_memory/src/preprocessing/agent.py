@@ -1,7 +1,9 @@
 """Preprocessing Agent orchestrator — transforms raw articles into structured data."""
 
+import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from src.config import Settings
 from src.id_utils import make_id
@@ -17,13 +19,42 @@ from src.scraper.fetchers.base import RawArticle
 
 logger = logging.getLogger(__name__)
 
-# Known source categories for credibility priors
-SOURCE_CATEGORIES = {
-    "bbc.co.uk": ("news_outlet", 0.90),
-    "reuters.com": ("wire_service", 0.95),
-    "apnews.com": ("wire_service", 0.95),
-    "t.me": ("social_media", 0.30),
-}
+
+# ── SOURCE_CATEGORIES — loaded once from data/sources.json ──────────────────
+# Single source of truth. The JSON is also used by scripts/seed_sources.py to
+# MERGE Source nodes into Neo4j; here we re-use it for the per-ingest credibility
+# lookup so seeding and ingestion can never disagree.
+#
+# Shape: { domain: (category, base_credibility) }
+# Domains not in this dict default to ("unknown", 0.50) at lookup time.
+
+_SOURCES_JSON_PATH = Path(__file__).resolve().parents[2] / "data" / "sources.json"
+
+
+def _load_source_categories() -> dict[str, tuple[str, float]]:
+    try:
+        entries = json.loads(_SOURCES_JSON_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        logger.warning("sources.json not found at %s; SOURCE_CATEGORIES is empty",
+                       _SOURCES_JSON_PATH)
+        return {}
+    except json.JSONDecodeError as e:
+        logger.error("sources.json is malformed (%s); SOURCE_CATEGORIES is empty", e)
+        return {}
+
+    out: dict[str, tuple[str, float]] = {}
+    for entry in entries:
+        domain = entry.get("domain")
+        if not domain:
+            continue
+        out[domain] = (
+            entry.get("category", "unknown"),
+            float(entry.get("base_credibility", 0.50)),
+        )
+    return out
+
+
+SOURCE_CATEGORIES = _load_source_categories()
 
 
 class PreprocessingAgent:

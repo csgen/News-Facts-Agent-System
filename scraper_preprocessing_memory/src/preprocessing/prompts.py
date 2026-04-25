@@ -1,7 +1,7 @@
 """Centralized LLM prompt templates for the Preprocessing Agent."""
 
 CLAIM_ISOLATION_PROMPT = """\
-You are a fact-checking assistant. Given a news article, extract all falsifiable claims.
+You are a fact-checking assistant. Given a news article/short statement, extract all falsifiable claims.
 
 A falsifiable claim is a concrete statement that can be verified as true or false using evidence.
 If there is explicit expression of the statement source, it should also be included in the claim.

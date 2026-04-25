@@ -685,6 +685,18 @@ class GraphStore:
             )
             return [dict(record) for record in result]
 
+    def get_claim_ids_for_article(self, article_id: str) -> list[str]:
+        """Return all claim_ids attached to a given article (via CONTAINS edge)."""
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                MATCH (a:Article {article_id: $article_id})-[:CONTAINS]->(c:Claim)
+                RETURN c.claim_id AS claim_id
+                """,
+                article_id=article_id,
+            )
+            return [record["claim_id"] for record in result]
+
     def auto_store_claim_with_entities(
         self,
         claim_id: str,

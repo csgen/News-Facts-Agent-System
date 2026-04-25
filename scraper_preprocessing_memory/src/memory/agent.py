@@ -295,6 +295,17 @@ class MemoryAgent:
         """Check if an article with this hash already exists."""
         return self._vector.check_content_hash_exists(content_hash)
 
+    def find_existing_claim_ids(self, content_hash: str) -> list[str]:
+        """Return claim_ids of an article matching this content_hash, or [].
+
+        Used by `decompose_input` to keep the public API idempotent: re-submitting
+        the same query returns the same claim_ids instead of creating duplicates.
+        """
+        article_id = self._vector.get_article_id_by_content_hash(content_hash)
+        if not article_id:
+            return []
+        return self._graph.get_claim_ids_for_article(article_id)
+
     def get_claims_by_ids(self, ids: list[str]) -> dict:
         return self._vector.get_claims_by_ids(ids)
 
