@@ -593,6 +593,20 @@ st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 # RESULTS (shown after clicking VERIFY)
 # ─────────────────────────────────────────────
 if run_btn and user_input.strip():
+    # ── Layer A + B Input Guardrail — runs BEFORE the pipeline ───────────
+    try:
+        from agents.input_guardrail import check_input
+        _guard = check_input(user_input)
+        if _guard["blocked"]:
+            st.error(
+                f"⚠️ **Input blocked** [{_guard['risk']} risk]\n\n"
+                f"{_guard['reason']}\n\n"
+                f"*Layer {'A — rule-based filter' if _guard['layer'] == 'A' else 'B — AI safety classifier'} triggered.*"
+            )
+            st.stop()
+    except Exception as _ge:
+        pass  # guardrail failure never blocks the pipeline
+
     with st.spinner("🔍 Agents working: Scraping → Preprocessing → Fact-Checking..."):
         result = get_real_verdict(user_input)
 
