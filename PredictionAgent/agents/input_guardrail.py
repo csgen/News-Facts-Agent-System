@@ -191,6 +191,14 @@ def layer_b_check(text: str) -> dict:
         import os
         from openai import OpenAI
 
+        # Try loading .env from the PredictionAgent root
+        try:
+            from dotenv import load_dotenv
+            _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            load_dotenv(os.path.join(_here, ".env"), override=False)
+        except ImportError:
+            pass
+
         api_key = os.environ.get("OPENAI_API_KEY", "")
         if not api_key:
             try:
