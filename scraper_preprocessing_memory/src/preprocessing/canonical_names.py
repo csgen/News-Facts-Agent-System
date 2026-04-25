@@ -58,6 +58,20 @@ def _load_canonical_lookup() -> dict[tuple[str, str], str]:
 _CANONICAL_LOOKUP: dict[tuple[str, str], str] = _load_canonical_lookup()
 
 
+def _build_any_type_lookup(typed_lookup: dict[tuple[str, str], str]) -> dict[str, str]:
+    """Collapse a {(type, name_lower): canonical} dict into {name_lower: canonical}.
+
+    Used at query time when the caller doesn't know the entity_type
+    (e.g. a frontend lookup of "Trump"). Cross-type collisions resolve to
+    whichever entry was inserted last — acceptable since most aliases are
+    type-unique in practice.
+    """
+    return {name_lower: canonical for (_et, name_lower), canonical in typed_lookup.items()}
+
+
+_CANONICAL_LOOKUP_ANY_TYPE: dict[str, str] = _build_any_type_lookup(_CANONICAL_LOOKUP)
+
+
 def canonicalize(name: str, entity_type: str) -> str:
     """Return the canonical form of an entity name if it's a known alias.
 
@@ -70,6 +84,21 @@ def canonicalize(name: str, entity_type: str) -> str:
     stripped = name.strip()
     key = (entity_type.strip().lower(), stripped.lower())
     return _CANONICAL_LOOKUP.get(key, stripped)
+
+
+def canonicalize_any_type(name: str) -> str | None:
+    """Return canonical form for `name` ignoring entity_type, or None if unknown.
+
+    Used by query-time lookups (e.g. `MemoryAgent.get_entity_by_name`) where
+    the caller doesn't know which entity_type the name belongs to.
+
+    Example:
+        canonicalize_any_type("USA")    → "United States"
+        canonicalize_any_type("trump")  → None  (not in registry)
+    """
+    if not name or not name.strip():
+        return None
+    return _CANONICAL_LOOKUP_ANY_TYPE.get(name.strip().lower())
 
 
 def get_all_canonical_names() -> set[tuple[str, str]]:
@@ -98,5 +127,6 @@ def get_all_canonical_names() -> set[tuple[str, str]]:
 
 def reload_canonical_lookup() -> None:
     """Reload the lookup table from disk. Call after canonical_promoter appends new entries."""
-    global _CANONICAL_LOOKUP
+    global _CANONICAL_LOOKUP, _CANONICAL_LOOKUP_ANY_TYPE
     _CANONICAL_LOOKUP = _load_canonical_lookup()
+    _CANONICAL_LOOKUP_ANY_TYPE = _build_any_type_lookup(_CANONICAL_LOOKUP)

@@ -350,8 +350,90 @@ class MemoryAgent:
         entity_id = self._graph.ensure_entity_exists(name)
         return self._graph.backfill_mentions_for_entity(entity_id, name)
 
-    def get_entity_by_name(self, name: str) -> Optional[dict]:
-        return self._graph.get_entity_by_name(name)
+    def get_entity_by_name(
+        self,
+        name: str,
+        fuzzy_threshold: int = 85,
+    ) -> Optional[dict]:
+        """Look up an Entity node by name with alias-aware multi-tier resolution.
+
+        Tier 1 — exact case-insensitive match on Entity.name in Neo4j.
+        Tier 2 — canonical alias resolution via data/canonical_entities.json
+                 (e.g. "USA" → "United States", "DPRK" → "North Korea").
+        Tier 3 — fuzzy string match across all Entity.name values using
+                 rapidfuzz.token_sort_ratio with a configurable threshold
+                 (default 85 — same threshold used by EntityMerger).
+
+        Returns the matched entity dict (same shape as graph.get_entity_by_name)
+        or None if no tier produces a match.
+
+        Backward-compatible: callers that pass only `name` see strictly more
+        matches than before; an exact match (Tier 1) returns immediately, so
+        existing well-formed inputs incur zero extra cost.
+
+        Notes
+        -----
+        - Names shorter than 3 chars skip Tier 3 (too short for reliable fuzzy
+          matching — would generate many false positives).
+        - Tier 3 fetches all Entity nodes from Neo4j once per call. For very
+          large graphs (10k+ entities) consider caching upstream.
+        """
+        if not name or not name.strip():
+            return None
+
+        # Tier 1: exact case-insensitive match
+        result = self._graph.get_entity_by_name(name)
+        if result:
+            return result
+
+        # Tier 2: canonical alias resolution (no entity_type known at query time)
+        from src.preprocessing.canonical_names import canonicalize_any_type
+        canonical = canonicalize_any_type(name)
+        if canonical and canonical.lower() != name.strip().lower():
+            result = self._graph.get_entity_by_name(canonical)
+            if result:
+                logger.info("get_entity_by_name: aliased '%s' → '%s'", name, canonical)
+                return result
+
+        # Tier 3: fuzzy match against all entity names
+        if len(name.strip()) < 3:
+            return None
+
+        try:
+            from rapidfuzz import fuzz, process
+        except ImportError:
+            logger.warning("rapidfuzz not available; skipping fuzzy entity lookup")
+            return None
+
+        all_entities = self._graph.get_all_entities()
+        if not all_entities:
+            return None
+
+        # Build name → entity map. Multiple entities may share the same name
+        # (rare after EntityMerger runs); we keep the one with the most claims.
+        name_to_entity: dict[str, dict] = {}
+        for e in all_entities:
+            existing = name_to_entity.get(e["name"])
+            if existing is None or (e.get("total_claims", 0) >
+                                    existing.get("total_claims", 0)):
+                name_to_entity[e["name"]] = e
+
+        match = process.extractOne(
+            name.strip(),
+            list(name_to_entity.keys()),
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=fuzzy_threshold,
+        )
+        if match is None:
+            return None
+
+        matched_name, score, _ = match
+        result = name_to_entity[matched_name]
+        logger.info(
+            "get_entity_by_name: fuzzy '%s' → '%s' (score=%.0f)",
+            name, matched_name, score,
+        )
+        return result
 
     def get_claim_count_for_entity(self, entity_id: str, since: datetime) -> int:
         return self._graph.get_claim_count_for_entity(entity_id, since)

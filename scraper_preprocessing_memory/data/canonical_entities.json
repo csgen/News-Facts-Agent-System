@@ -2,12 +2,12 @@
   {
     "canonical_name": "United States",
     "entity_type": "country",
-    "aliases": ["USA", "US", "U.S.", "U.S.A.", "America", "United States of America"]
+    "aliases": ["USA", "US", "U.S.", "U.S.A.", "States", "America", "United States of America"]
   },
   {
     "canonical_name": "United Kingdom",
     "entity_type": "country",
-    "aliases": ["UK", "U.K.", "Britain", "Great Britain"]
+    "aliases": ["UK", "U.K.", "Britain", "Great Britain", "England"]
   },
   {
     "canonical_name": "China",
@@ -42,7 +42,7 @@
   {
     "canonical_name": "Donald Trump",
     "entity_type": "person",
-    "aliases": ["Trump", "President Trump", "Donald J. Trump", "DJT"]
+    "aliases": ["Trump", "President Trump", "Donald J. Trump", "DJT", "Mr. Trump"]
   },
   {
     "canonical_name": "Joe Biden",
