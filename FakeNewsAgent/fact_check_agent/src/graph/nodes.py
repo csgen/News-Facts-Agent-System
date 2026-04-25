@@ -561,6 +561,7 @@ def write_memory(state: FactCheckState, memory: "MemoryAgent") -> dict:
         confidence_score= output.confidence_score,
         bias_score      = output.bias_score,
         memory          = memory,
+        topic_text      = state["input"].topic_text,
     )
 
     return {}

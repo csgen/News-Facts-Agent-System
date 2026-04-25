@@ -129,6 +129,7 @@ class GraphStore:
                         article_id: $article_id,
                         claim_text: $claim_text,
                         claim_type: $claim_type,
+                        topic_text: $topic_text,
                         extracted_at: datetime($extracted_at),
                         status: $status
                     })
@@ -138,6 +139,7 @@ class GraphStore:
                     claim_id=claim["claim_id"],
                     claim_text=claim["claim_text"],
                     claim_type=claim.get("claim_type", ""),
+                    topic_text=claim.get("topic_text", ""),
                     extracted_at=claim["extracted_at"],
                     status=claim.get("status", "pending"),
                 )

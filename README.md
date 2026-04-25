@@ -170,7 +170,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml \
 
 ```
 news_facts_system/
-├── scraper_preprocessing_memory/   # Kleivn's repo (near-verbatim)
+├── scraper_preprocessing_memory/   # Kelvin's repo (near-verbatim)
 │   └── src/
 │       ├── pipeline.py             # `python -m src.pipeline` entry
 │       ├── memory/agent.py         # Unified MemoryAgent — the single DB facade
@@ -187,7 +187,7 @@ news_facts_system/
 │   ├── frontend/app.py             # Streamlit UI
 │   ├── agents/
 │   │   ├── fact_check_agent.py     # NEW adapter — wraps FakeNewsAgent's pipeline
-│   │   ├── memory_agent.py         # NEW adapter — re-exports scapper's MemoryAgent
+│   │   ├── memory_agent.py         # NEW adapter — re-exports scraper's MemoryAgent
 │   │   ├── entity_tracker.py       # Task 3 (unchanged)
 │   │   └── prediction_agent.py     # Task 3 (unchanged)
 │   └── evaluation/
@@ -227,7 +227,7 @@ news_facts_system/
                 │ ingest_preprocessed()
                 │
    ┌────────────────────────┐
-   │ scapper pipeline       │   one-shot, periodic or on-demand
+   │ scraper pipeline       │   one-shot, periodic or on-demand
    │ (RSS / Tavily / …)     │
    └────────────────────────┘
 ```

@@ -67,6 +67,7 @@ def claim_to_fact_check_input(
         image_caption = image_caption,
         image_url     = image_url,
         timestamp     = claim.extracted_at,
+        topic_text    = getattr(claim, "topic_text", "") or "",
     )
 
 

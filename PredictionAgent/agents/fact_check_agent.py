@@ -11,7 +11,7 @@ Public API for Streamlit frontend and other PredictionAgent code:
     output = fact_check_claim("Tesla recalled 500k vehicles due to brake defects")
 
 This file lives in the integrated monorepo and bridges the three subfolders
-by adjusting sys.path so `src.*` (scapper) and `fact_check_agent.src.*`
+by adjusting sys.path so `src.*` (scraper) and `fact_check_agent.src.*`
 (FakeNewsAgent) resolve from this process.
 """
 import logging
@@ -73,6 +73,7 @@ def _claim_to_input(
         image_caption=image_caption,
         image_url=image_url,
         timestamp=claim.extracted_at,
+        topic_text=getattr(claim, "topic_text", "") or "",
     )
 
 

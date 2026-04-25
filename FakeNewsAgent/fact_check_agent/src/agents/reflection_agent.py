@@ -147,12 +147,17 @@ def update_source_credibility(
     confidence_score: int,
     bias_score: float,
     memory: "MemoryAgent",
+    topic_text: str = "",
 ) -> None:
     """Append one new (source, topic, credibility, bias) observation after a verdict.
 
     Called by write_memory node. Always inserts — never overwrites. The full
     observation history is preserved so query-time aggregation can weight and
     average across all past verdicts for this (source, topic) region.
+
+    `topic_text` is the coarse topic category for the claim (e.g. "technology").
+    Empty string is acceptable — frontend direct-query path has no preprocessing
+    so no topic is available.
     """
     source_id   = source_id_from_url(source_url)
     credibility = credibility_signal(verdict_label, confidence_score)
@@ -163,7 +168,7 @@ def update_source_credibility(
         memory.add_source_credibility_point(
             point_id      = point_id,
             claim_text    = claim_text,
-            topic_text    = claim_text,
+            topic_text    = topic_text,
             source_id     = source_id,
             credibility   = credibility,
             bias          = bias_score,
