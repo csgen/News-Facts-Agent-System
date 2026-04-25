@@ -1,0 +1,58 @@
+# =============================================================================
+# news_facts_system — top-level (monorepo-wide) gitignore
+#
+# Per-folder gitignores in FakeNewsAgent/ and scraper_preprocessing_memory/
+# stay in place and add subtree-specific rules on top of these.
+# =============================================================================
+
+# ── Secrets (CRITICAL — never commit) ────────────────────────────────────────
+.env
+*.env
+.env.*
+!.env.example
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg
+*.egg-info/
+dist/
+build/
+.Python
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Test / coverage ──────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ── Local Docker volume data (Mode B/C bind-mounts) ─────────────────────────
+docker/data/
+
+# ── Logs / large local artefacts ─────────────────────────────────────────────
+*.log
+*.pkl
+results/
+
+# ── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Claude / agent metadata ──────────────────────────────────────────────────
+.claude/

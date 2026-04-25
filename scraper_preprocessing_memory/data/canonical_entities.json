@@ -1,0 +1,187 @@
+[
+  {
+    "canonical_name": "United States",
+    "entity_type": "country",
+    "aliases": ["USA", "US", "U.S.", "U.S.A.", "America", "United States of America"]
+  },
+  {
+    "canonical_name": "United Kingdom",
+    "entity_type": "country",
+    "aliases": ["UK", "U.K.", "Britain", "Great Britain"]
+  },
+  {
+    "canonical_name": "China",
+    "entity_type": "country",
+    "aliases": ["PRC", "People's Republic of China", "Mainland China"]
+  },
+  {
+    "canonical_name": "Russia",
+    "entity_type": "country",
+    "aliases": ["Russian Federation"]
+  },
+  {
+    "canonical_name": "North Korea",
+    "entity_type": "country",
+    "aliases": ["DPRK", "Democratic People's Republic of Korea"]
+  },
+  {
+    "canonical_name": "South Korea",
+    "entity_type": "country",
+    "aliases": ["ROK", "Republic of Korea"]
+  },
+  {
+    "canonical_name": "United Arab Emirates",
+    "entity_type": "country",
+    "aliases": ["UAE", "U.A.E."]
+  },
+  {
+    "canonical_name": "Democratic Republic of the Congo",
+    "entity_type": "country",
+    "aliases": ["DRC", "DR Congo"]
+  },
+  {
+    "canonical_name": "Donald Trump",
+    "entity_type": "person",
+    "aliases": ["Trump", "President Trump", "Donald J. Trump", "DJT"]
+  },
+  {
+    "canonical_name": "Joe Biden",
+    "entity_type": "person",
+    "aliases": ["Biden", "President Biden", "Joseph R. Biden", "Joseph Biden"]
+  },
+  {
+    "canonical_name": "Vladimir Putin",
+    "entity_type": "person",
+    "aliases": ["Putin", "President Putin"]
+  },
+  {
+    "canonical_name": "Xi Jinping",
+    "entity_type": "person",
+    "aliases": ["Xi", "President Xi"]
+  },
+  {
+    "canonical_name": "Elon Musk",
+    "entity_type": "person",
+    "aliases": ["Musk", "Mr. Musk"]
+  },
+  {
+    "canonical_name": "Volodymyr Zelenskyy",
+    "entity_type": "person",
+    "aliases": ["Zelenskyy", "Zelensky", "President Zelenskyy", "Volodymyr Zelensky"]
+  },
+  {
+    "canonical_name": "Federal Bureau of Investigation",
+    "entity_type": "organization",
+    "aliases": ["FBI", "F.B.I."]
+  },
+  {
+    "canonical_name": "Central Intelligence Agency",
+    "entity_type": "organization",
+    "aliases": ["CIA", "C.I.A."]
+  },
+  {
+    "canonical_name": "United Nations",
+    "entity_type": "organization",
+    "aliases": ["UN", "U.N."]
+  },
+  {
+    "canonical_name": "European Union",
+    "entity_type": "organization",
+    "aliases": ["EU", "E.U."]
+  },
+  {
+    "canonical_name": "North Atlantic Treaty Organization",
+    "entity_type": "organization",
+    "aliases": ["NATO", "N.A.T.O."]
+  },
+  {
+    "canonical_name": "World Health Organization",
+    "entity_type": "organization",
+    "aliases": ["WHO", "W.H.O."]
+  },
+  {
+    "canonical_name": "International Monetary Fund",
+    "entity_type": "organization",
+    "aliases": ["IMF", "I.M.F."]
+  },
+  {
+    "canonical_name": "Federal Reserve",
+    "entity_type": "organization",
+    "aliases": ["Fed", "The Fed", "US Federal Reserve"]
+  },
+  {
+    "canonical_name": "Tesla Inc",
+    "entity_type": "organization",
+    "aliases": ["Tesla", "Tesla Motors"]
+  },
+  {
+    "canonical_name": "Apple Inc",
+    "entity_type": "organization",
+    "aliases": ["Apple", "Apple Computer"]
+  },
+  {
+    "canonical_name": "Microsoft Corporation",
+    "entity_type": "organization",
+    "aliases": ["Microsoft", "MSFT"]
+  },
+  {
+    "canonical_name": "Alphabet Inc",
+    "entity_type": "organization",
+    "aliases": ["Google", "Alphabet"]
+  },
+  {
+    "canonical_name": "Meta Platforms",
+    "entity_type": "organization",
+    "aliases": ["Meta", "Facebook Inc"]
+  },
+  {
+    "canonical_name": "Amazon.com Inc",
+    "entity_type": "organization",
+    "aliases": ["Amazon"]
+  },
+  {
+    "canonical_name": "JPMorgan Chase",
+    "entity_type": "organization",
+    "aliases": ["JPMorgan", "JP Morgan", "JPMorgan Chase & Co"]
+  },
+  {
+    "canonical_name": "Goldman Sachs",
+    "entity_type": "organization",
+    "aliases": ["Goldman", "Goldman Sachs Group"]
+  },
+  {
+    "canonical_name": "BBC",
+    "entity_type": "organization",
+    "aliases": ["British Broadcasting Corporation", "BBC News"]
+  },
+  {
+    "canonical_name": "Reuters",
+    "entity_type": "organization",
+    "aliases": ["Thomson Reuters"]
+  },
+  {
+    "canonical_name": "CNN",
+    "entity_type": "organization",
+    "aliases": ["Cable News Network"]
+  },
+  {
+    "canonical_name": "Islamic Revolutionary Guard Corps",
+    "entity_type": "organization",
+    "aliases": ["IRGC", "Iran Revolutionary Guard", "Revolutionary Guards"]
+  },
+  {
+    "canonical_name": "Hamas",
+    "entity_type": "organization",
+    "aliases": ["Islamic Resistance Movement"]
+  },
+  {
+    "canonical_name": "Hezbollah",
+    "entity_type": "organization",
+    "aliases": ["Hizbollah", "Hizb Allah"]
+  },
+  {
+    "canonical_name": "National Aeronautics and Space Administration",
+    "entity_type": "organization",
+    "aliases": ["NASA", "N.A.S.A."]
+  }
+]

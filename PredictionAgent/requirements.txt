@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────
+# FactGuard — merged requirements
+# Covers: Task 1 (Data/Memory), Task 2 (Agentic AI), Task 3 (Frontend/Evaluation)
+# ─────────────────────────────────────────────
+
+# ── Core / Config ──────────────────────────────────────────────────────────────
+pydantic>=2.7,<3.0
+pydantic-settings>=2.3,<3.0
+python-dotenv>=1.0,<2.0
+
+# ── LLM / OpenAI ───────────────────────────────────────────────────────────────
+openai>=2.0,<3.0
+
+# ── LangGraph / LangChain (Task 2) ─────────────────────────────────────────────
+langgraph>=0.2
+langchain>=0.3
+langchain-openai>=0.1
+langsmith>=0.1
+
+# ── Memory / Graph DB (Task 1) ─────────────────────────────────────────────────
+neo4j>=5.0,<6.0
+chromadb>=1.0.0,<2.0
+
+# ── Observability (optional — falls back to openai if not installed) ────────────
+langfuse>=2.0,<3.0
+
+# ── Live Search ────────────────────────────────────────────────────────────────
+tavily-python>=0.3
+
+# ── Scraper / Fetchers (Task 1) ────────────────────────────────────────────────
+httpx>=0.27,<1.0
+newspaper3k>=0.2.8,<0.3
+feedparser>=6.0,<7.0
+apscheduler>=3.10,<4.0
+lxml_html_clean>=0.1.0
+
+# ── NLP / Preprocessing (Task 1) ───────────────────────────────────────────────
+spacy>=3.7,<4.0
+# After install, download the model:  python -m spacy download en_core_web_sm
+
+# ── Cross-modal / Vision (Task 2 SOTA — optional) ──────────────────────────────
+transformers>=4.40
+torch>=2.2
+Pillow>=10.0
+
+# ── Reranking (Task 2 — optional) ──────────────────────────────────────────────
+# sentence-transformers>=3.0   # uncomment to enable cross-encoder reranking
+
+# ── Frontend (Task 3) ──────────────────────────────────────────────────────────
+streamlit>=1.32.0
+plotly>=5.18.0
+pandas>=2.0
+
+# ── Evaluation (Task 3) ────────────────────────────────────────────────────────
+scikit-learn>=1.4
+# datasets>=2.0                # uncomment to load real LIAR/FEVER/Factify datasets
+
+# ── Dev / Testing (Task 1) ─────────────────────────────────────────────────────
+pytest>=8.0,<9.0
+pytest-cov>=5.0,<6.0
+respx>=0.21,<1.0
+ruff>=0.4,<1.0

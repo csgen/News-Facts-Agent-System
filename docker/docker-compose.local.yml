@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# news_facts_system — local-infrastructure overlay.
+#
+# Services are gated by Compose profiles so each can be opted into independently:
+#   neo4j     — local Neo4j 5-community (bolt://neo4j:7687, browser http://localhost:7474)
+#   chroma    — local ChromaDB (http://chroma:8000 inside the network)
+#   ollama    — local Ollama LLM server (http://ollama:11434)
+#   langfuse  — Postgres + Langfuse UI (http://localhost:3000)
+#
+# Activate with --profile flags, e.g.:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml \
+#                  --profile neo4j --profile chroma up -d
+#
+# Remember to set the matching env-vars in .env:
+#   NEO4J_URI=bolt://neo4j:7687
+#   CHROMA_HOST=chroma   (and leave CHROMA_API_KEY blank)
+#   LLM_PROVIDER=ollama  OLLAMA_BASE_URL=http://ollama:11434/v1
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Local Neo4j (profile: neo4j) ──────────────────────────────────────────
+  neo4j:
+    image: neo4j:5-community
+    container_name: nfs-neo4j
+    profiles: ["neo4j"]
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # Browser UI
+      - "7687:7687"   # Bolt driver
+    environment:
+      NEO4J_AUTH: neo4j/fakenews123
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+    volumes:
+      - ./data/neo4j/data:/data
+      - ./data/neo4j/logs:/logs
+    networks:
+      - news_facts_net
+
+  # ── Local ChromaDB (profile: chroma) ──────────────────────────────────────
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: nfs-chroma
+    profiles: ["chroma"]
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - ./data/chroma:/chroma/chroma
+    networks:
+      - news_facts_net
+
+  # ── Local Ollama LLM server (profile: ollama) ─────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nfs-ollama
+    profiles: ["ollama"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    networks:
+      - news_facts_net
+
+  # One-shot sidecar that pulls the default models after Ollama starts.
+  # Invoke manually:  docker compose --profile ollama run --rm ollama-init
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: nfs-ollama-init
+    profiles: ["ollama"]
+    depends_on:
+      - ollama
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        until ollama list >/dev/null 2>&1; do sleep 1; done;
+        ollama pull gemma2:2b;
+        ollama pull nomic-embed-text
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    networks:
+      - news_facts_net
+
+  # ── Langfuse observability (profile: langfuse) ────────────────────────────
+  langfuse-db:
+    image: postgres:15
+    container_name: nfs-langfuse-db
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse123
+      POSTGRES_DB: langfuse
+    volumes:
+      - ./data/langfuse-db:/var/lib/postgresql/data
+    networks:
+      - news_facts_net
+
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: nfs-langfuse
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - langfuse-db
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse123@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: news-facts-langfuse-secret
+      SALT: news-facts-langfuse-salt
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+    networks:
+      - news_facts_net
+
+networks:
+  news_facts_net:
+    driver: bridge

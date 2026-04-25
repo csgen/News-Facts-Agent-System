@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# news_facts_system — cloud-default compose file.
+#
+# Default mode is fully cloud (ChromaDB Cloud + Neo4j Aura + OpenAI/Gemini APIs).
+# Run `docker compose up -d ui` to start the Streamlit frontend.
+#
+# For teammates running their own local DBs / LLMs, overlay the -local file:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml \
+#                  --profile neo4j --profile chroma up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-app-base: &app-base
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: news_facts_system:latest
+  env_file: ../.env
+  volumes:
+    # Mount the whole repo so code edits on the host show up without rebuild.
+    - ..:/app
+  networks:
+    - news_facts_net
+
+services:
+
+  # Streamlit UI — user-facing entry point (long-running).
+  ui:
+    <<: *app-base
+    container_name: nfs-ui
+    working_dir: /app/PredictionAgent
+    command:
+      - streamlit
+      - run
+      - frontend/app.py
+      - --server.port=8501
+      - --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+
+  # One-shot: scrape → preprocess → ingest to the DB.
+  # Invoked as:   docker compose run --rm scraper
+  scraper:
+    <<: *app-base
+    container_name: nfs-scraper
+    working_dir: /app/scraper_preprocessing_memory
+    command: ["python", "-m", "src.pipeline"]
+    profiles: ["oneshot"]
+
+  # One-shot: create Neo4j constraints + seed canonical news sources.
+  # Run this once after the DB (cloud or local) is first available.
+  init-db:
+    <<: *app-base
+    container_name: nfs-init-db
+    working_dir: /app/scraper_preprocessing_memory
+    command:
+      - sh
+      - -c
+      - "python scripts/init_neo4j.py && python scripts/seed_sources.py"
+    profiles: ["oneshot"]
+
+  # One-shot: run the fact-check benchmark on LIAR / FEVER / Factify.
+  bench:
+    <<: *app-base
+    container_name: nfs-bench
+    working_dir: /app/PredictionAgent
+    command: ["python", "-m", "evaluation.evaluation"]
+    profiles: ["oneshot"]
+
+  # Interactive shell inside the container (for debugging / manual imports).
+  shell:
+    <<: *app-base
+    container_name: nfs-shell
+    working_dir: /app
+    command: ["bash"]
+    stdin_open: true
+    tty: true
+    profiles: ["oneshot"]
+
+networks:
+  news_facts_net:
+    driver: bridge

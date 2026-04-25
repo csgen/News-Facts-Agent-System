@@ -1,0 +1,58 @@
+[
+  {
+    "source_id": "src_reuters_com",
+    "name": "Reuters",
+    "domain": "reuters.com",
+    "category": "wire_service",
+    "base_credibility": 0.95
+  },
+  {
+    "source_id": "src_apnews_com",
+    "name": "AP News",
+    "domain": "apnews.com",
+    "category": "wire_service",
+    "base_credibility": 0.95
+  },
+  {
+    "source_id": "src_bbc_co_uk",
+    "name": "BBC News",
+    "domain": "bbc.co.uk",
+    "category": "news_outlet",
+    "base_credibility": 0.90
+  },
+  {
+    "source_id": "src_cnn_com",
+    "name": "CNN",
+    "domain": "cnn.com",
+    "category": "news_outlet",
+    "base_credibility": 0.75
+  },
+  {
+    "source_id": "src_t_me",
+    "name": "Telegram",
+    "domain": "t.me",
+    "category": "social_media",
+    "base_credibility": 0.30
+  },
+  {
+    "source_id": "src_nytimes_com",
+    "name": "The New York Times",
+    "domain": "nytimes.com",
+    "category": "news_outlet",
+    "base_credibility": 0.85
+  },
+  {
+    "source_id": "src_theguardian_com",
+    "name": "The Guardian",
+    "domain": "theguardian.com",
+    "category": "news_outlet",
+    "base_credibility": 0.82
+  },
+  {
+    "source_id": "src_reddit_com",
+    "name": "Reddit",
+    "domain": "reddit.com",
+    "category": "social_media",
+    "base_credibility": 0.25
+  }
+]
