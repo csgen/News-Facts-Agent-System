@@ -29,88 +29,37 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-# THEME STATE
+# CUSTOM CSS
 # ─────────────────────────────────────────────
-if "theme" not in st.session_state:
-    st.session_state["theme"] = "dark"
-
-_dark = st.session_state["theme"] == "dark"
-
-# ─────────────────────────────────────────────
-# CUSTOM CSS — theme-aware
-# ─────────────────────────────────────────────
-_bg          = "#0a0e1a"     if _dark else "#f0f4ff"
-_bg2         = "#1e2535"     if _dark else "#ffffff"
-_bg3         = "#151b2e"     if _dark else "#f8faff"
-_border      = "#2d3748"     if _dark else "#dde3f0"
-_text        = "#e2e8f0"     if _dark else "#1e293b"
-_text_muted  = "#64748b"     if _dark else "#64748b"
-_text_soft   = "#94a3b8"     if _dark else "#475569"
-_text_head   = "#f0f4ff"     if _dark else "#0f172a"
-_accent      = "#a78bfa"     if _dark else "#7c3aed"
-_tab_bg      = "#1e2535"     if _dark else "#e8ecf5"
-_tab_sel     = "#2d3748"     if _dark else "#ffffff"
-_input_bg    = "#1e2535"     if _dark else "#ffffff"
-_section_bdr = "#1e2535"     if _dark else "#dde3f0"
-
-st.markdown(f"""
+st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;700&display=swap');
 
-/* Global */
-html, body, [class*="css"] {{
+html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif;
-    background-color: {_bg};
-    color: {_text};
-}}
+    background-color: #0a0e1a;
+    color: #e2e8f0;
+}
 
-/* Hide Streamlit branding */
-#MainMenu, footer, header {{visibility: hidden;}}
+#MainMenu, footer, header {visibility: hidden;}
 
-/* Main container */
-.main .block-container {{
+.main .block-container {
     padding: 2rem 3rem;
     max-width: 1400px;
-}}
+}
 
-/* Hero title */
-.hero-title {{
-    font-family: 'Space Mono', monospace;
-    font-size: 2.8rem;
-    font-weight: 700;
-    color: {_text_head};
-    letter-spacing: -1px;
-    margin-bottom: 0.4rem;
-}}
-.hero-subtitle {{
-    font-size: 1rem;
-    color: {_text_muted};
-    margin-bottom: 0.8rem;
-}}
-
-/* Verdict cards */
-.verdict-card {{
-    background: linear-gradient(135deg, {_bg2} 0%, {_bg3} 100%);
-    border: 1px solid {_border};
+.verdict-card {
+    background: linear-gradient(135deg, #1e2535 0%, #151b2e 100%);
+    border: 1px solid #2d3748;
     border-radius: 16px;
     padding: 1.5rem;
     margin-bottom: 1rem;
-}}
-.verdict-supported {{
-    border-left: 4px solid #10b981;
-    box-shadow: 0 0 20px rgba(16,185,129,0.08);
-}}
-.verdict-refuted {{
-    border-left: 4px solid #ef4444;
-    box-shadow: 0 0 20px rgba(239,68,68,0.08);
-}}
-.verdict-misleading {{
-    border-left: 4px solid #f59e0b;
-    box-shadow: 0 0 20px rgba(245,158,11,0.08);
-}}
+}
+.verdict-supported  { border-left: 4px solid #10b981; box-shadow: 0 0 20px rgba(16,185,129,0.08); }
+.verdict-refuted    { border-left: 4px solid #ef4444; box-shadow: 0 0 20px rgba(239,68,68,0.08); }
+.verdict-misleading { border-left: 4px solid #f59e0b; box-shadow: 0 0 20px rgba(245,158,11,0.08); }
 
-/* Badge */
-.badge {{
+.badge {
     display: inline-block;
     padding: 4px 14px;
     border-radius: 999px;
@@ -119,13 +68,12 @@ html, body, [class*="css"] {{
     font-family: 'Space Mono', monospace;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-}}
-.badge-supported {{ background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }}
-.badge-refuted {{ background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }}
-.badge-misleading {{ background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }}
+}
+.badge-supported  { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+.badge-refuted    { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+.badge-misleading { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
 
-/* Section headers */
-.section-header {{
+.section-header {
     font-family: 'Space Mono', monospace;
     font-size: 0.7rem;
     letter-spacing: 0.2em;
@@ -133,118 +81,52 @@ html, body, [class*="css"] {{
     color: #475569;
     margin-bottom: 1rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid {_section_bdr};
-}}
+    border-bottom: 1px solid #1e2535;
+}
 
-/* Info metric */
-.metric-box {{
-    background: {_bg2};
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    text-align: center;
-}}
-.metric-value {{
-    font-family: 'Space Mono', monospace;
-    font-size: 2rem;
-    font-weight: 700;
-    color: {_accent};
-}}
-.metric-label {{
-    font-size: 0.75rem;
-    color: #64748b;
-    margin-top: 2px;
-}}
+.metric-box   { background: #1e2535; border-radius: 12px; padding: 1rem 1.2rem; text-align: center; }
+.metric-value { font-family: 'Space Mono', monospace; font-size: 2rem; font-weight: 700; color: #a78bfa; }
+.metric-label { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
 
-/* Bias highlight */
-.bias-text {{
-    background: {_bg2};
-    border-radius: 12px;
-    padding: 1.2rem;
-    line-height: 2;
-    font-size: 0.95rem;
-    color: {_text};
-}}
-.highlight-high {{ background: rgba(239,68,68,0.25); border-radius: 4px; padding: 1px 4px; }}
-.highlight-med {{ background: rgba(245,158,11,0.2); border-radius: 4px; padding: 1px 4px; }}
-.highlight-low {{ background: rgba(99,102,241,0.15); border-radius: 4px; padding: 1px 4px; }}
+.bias-text { background: #1e2535; border-radius: 12px; padding: 1.2rem; line-height: 2; font-size: 0.95rem; }
+.highlight-high { background: rgba(239,68,68,0.25);  border-radius: 4px; padding: 1px 4px; }
+.highlight-med  { background: rgba(245,158,11,0.2);  border-radius: 4px; padding: 1px 4px; }
+.highlight-low  { background: rgba(99,102,241,0.15); border-radius: 4px; padding: 1px 4px; }
 
-/* Source pill */
-.source-pill {{
+.source-pill {
     display: inline-block;
-    background: {_bg2};
-    border: 1px solid {_border};
+    background: #1e2535;
+    border: 1px solid #2d3748;
     border-radius: 8px;
     padding: 6px 14px;
     font-size: 0.8rem;
     margin: 4px;
-    color: {_text_soft};
-}}
+    color: #94a3b8;
+}
 
-/* Tab styling override */
-.stTabs [data-baseweb="tab-list"] {{
-    gap: 4px;
-    background: {_tab_bg};
-    padding: 6px;
-    border-radius: 12px;
-}}
-.stTabs [data-baseweb="tab"] {{
-    border-radius: 8px;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.75rem;
-    letter-spacing: 0.05em;
-    color: #64748b;
-}}
-.stTabs [aria-selected="true"] {{
-    background: {_tab_sel} !important;
-    color: {_accent} !important;
-}}
+.stTabs [data-baseweb="tab-list"] { gap: 4px; background: #1e2535; padding: 6px; border-radius: 12px; }
+.stTabs [data-baseweb="tab"]      { border-radius: 8px; font-family: 'Space Mono', monospace; font-size: 0.75rem; letter-spacing: 0.05em; color: #64748b; }
+.stTabs [aria-selected="true"]    { background: #2d3748 !important; color: #a78bfa !important; }
 
-/* Input styling */
-.stTextArea textarea, .stTextInput input {{
-    background: {_input_bg} !important;
-    border: 1px solid {_border} !important;
+.stTextArea textarea, .stTextInput input {
+    background: #1e2535 !important;
+    border: 1px solid #2d3748 !important;
     border-radius: 10px !important;
-    color: {_text} !important;
+    color: #e2e8f0 !important;
     font-family: 'DM Sans', sans-serif !important;
-}}
+}
 
-/* Button */
-.stButton > button {{
+.stButton > button {
     background: linear-gradient(135deg, #7c3aed, #4f46e5);
-    color: white;
-    border: none;
-    border-radius: 10px;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.8rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    padding: 0.6rem 2rem;
-    transition: opacity 0.2s;
-}}
-.stButton > button:hover {{
-    opacity: 0.85;
-}}
+    color: white; border: none; border-radius: 10px;
+    font-family: 'Space Mono', monospace; font-size: 0.8rem;
+    font-weight: 700; letter-spacing: 0.05em;
+    padding: 0.6rem 2rem; transition: opacity 0.2s;
+}
+.stButton > button:hover { opacity: 0.85; }
 
-/* Image mismatch warning */
-.img-mismatch-warning {{
-    background: rgba(239,68,68,0.1);
-    border: 1px solid rgba(239,68,68,0.3);
-    border-radius: 10px;
-    padding: 0.8rem 1rem;
-    color: #fca5a5;
-    font-size: 0.85rem;
-}}
-.img-match-ok {{
-    background: rgba(16,185,129,0.1);
-    border: 1px solid rgba(16,185,129,0.3);
-    border-radius: 10px;
-    padding: 0.8rem 1rem;
-    color: #6ee7b7;
-    font-size: 0.85rem;
-}}
-
-
-
+.img-mismatch-warning { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 10px; padding: 0.8rem 1rem; color: #fca5a5; font-size: 0.85rem; }
+.img-match-ok         { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 10px; padding: 0.8rem 1rem; color: #6ee7b7; font-size: 0.85rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -566,35 +448,142 @@ def render_bias_chart(bias_score: float):
 # APP LAYOUT
 # ─────────────────────────────────────────────
 
-# ── Theme toggle (top-right corner) ──────────
-_theme_icon = "☀️  Light" if _dark else "🌙  Dark"
-_, _tc = st.columns([10, 1])
-with _tc:
-    if st.button(_theme_icon, key="theme_toggle"):
-        st.session_state["theme"] = "light" if _dark else "dark"
-        st.rerun()
-
-# ── Centered hero header (inline styles — no CSS classes) ────────
-st.markdown(f"""
+# ── Centered hero header ──────────────────────
+st.markdown("""
 <div style="text-align:center; margin-bottom:0.5rem; padding-top:0.5rem;">
   <div style="font-size:3rem; margin-bottom:0.3rem; line-height:1;">🛡️</div>
   <div style="font-family:'Space Mono',monospace; font-size:2.6rem; font-weight:700;
-              color:{_text_head}; letter-spacing:-1px; margin-bottom:0.35rem; line-height:1.1;">FactGuard</div>
-  <div style="font-size:0.98rem; color:{_text_muted}; margin-bottom:1.2rem;">
+              color:#f0f4ff; letter-spacing:-1px; margin-bottom:0.35rem; line-height:1.1;">FactGuard</div>
+  <div style="font-size:0.98rem; color:#64748b; margin-bottom:1.2rem;">
     Multi-Agent AI Fact-Checking System &middot; Powered by LLMs + Knowledge Graph
   </div>
   <div style="display:flex; justify-content:center; max-width:640px; margin:0 auto 1.6rem auto;">
     <div style="flex:1; text-align:center; font-size:0.82rem; font-weight:500;
-                color:{_text_soft}; padding:0.15rem 1rem;
-                border-right:1px solid {_border};">Shantam Sharma</div>
+                color:#94a3b8; padding:0.15rem 1rem; border-right:1px solid #2d3748;">Shantam Sharma</div>
     <div style="flex:1; text-align:center; font-size:0.82rem; font-weight:500;
-                color:{_text_soft}; padding:0.15rem 1rem;
-                border-right:1px solid {_border};">Chen Sigen</div>
+                color:#94a3b8; padding:0.15rem 1rem; border-right:1px solid #2d3748;">Chen Sigen</div>
     <div style="flex:1; text-align:center; font-size:0.82rem; font-weight:500;
-                color:{_text_soft}; padding:0.15rem 1rem;">Ahmed Abdul Wasae</div>
+                color:#94a3b8; padding:0.15rem 1rem;">Ahmed Abdul Wasae</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ── Architecture Diagram ──────────────────────
+import streamlit.components.v1 as _components
+
+_components.html("""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: #0a0e1a;
+    font-family: 'DM Sans', sans-serif;
+    overflow: hidden;
+  }
+  body { padding: 12px 20px 8px 20px; }
+  .lbl {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #475569;
+    margin-bottom: 12px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: nowrap;
+    gap: 0;
+  }
+  .box {
+    background: #1e2535;
+    border: 1px solid #2d3748;
+    border-radius: 10px;
+    padding: 8px 10px;
+    text-align: center;
+    min-width: 90px;
+    max-width: 108px;
+    flex-shrink: 0;
+  }
+  .box-fc   { border-color: rgba(56,189,248,0.45); background: rgba(56,189,248,0.07); }
+  .box-pred { border-color: rgba(52,211,153,0.45); background: rgba(52,211,153,0.07); }
+  .icon { font-size: 1.25rem; margin-bottom: 3px; line-height: 1.3; }
+  .name { font-family: 'Space Mono', monospace; font-size: 9px; font-weight: 700; color: #a78bfa; line-height: 1.4; }
+  .sub  { font-size: 8px; color: #475569; margin-top: 3px; }
+  .sub-fc   { color: #38bdf8; }
+  .sub-pred { color: #34d399; }
+  .arr { display: flex; align-items: center; flex-shrink: 0; padding: 0 1px; }
+  @keyframes flow { from { stroke-dashoffset: 20; } to { stroke-dashoffset: 0; } }
+  .fp { stroke-dasharray: 5 4; animation: flow 0.8s linear infinite; }
+</style>
+</head>
+<body>
+  <div class="lbl">&#128295;&nbsp; System Architecture — Agent Pipeline</div>
+  <div class="row">
+
+    <div class="box">
+      <div class="icon">🛡️</div>
+      <div class="name">Input<br>Guardrail</div>
+      <div class="sub">Layer A+B</div>
+    </div>
+    <div class="arr"><svg width="40" height="16" viewBox="0 0 40 16">
+      <path class="fp" d="M0,8 L32,8" stroke="#a78bfa" stroke-width="2" fill="none"/>
+      <polygon points="32,3 40,8 32,13" fill="#a78bfa"/>
+    </svg></div>
+
+    <div class="box">
+      <div class="icon">⚙️</div>
+      <div class="name">Preprocessing<br>Agent</div>
+      <div class="sub">NER · Claims</div>
+    </div>
+    <div class="arr"><svg width="40" height="16" viewBox="0 0 40 16">
+      <path class="fp" d="M0,8 L32,8" stroke="#a78bfa" stroke-width="2" fill="none"/>
+      <polygon points="32,3 40,8 32,13" fill="#a78bfa"/>
+    </svg></div>
+
+    <div class="box box-fc">
+      <div class="icon">🔍</div>
+      <div class="name">Fact-Check<br>Agent</div>
+      <div class="sub sub-fc">LangGraph</div>
+    </div>
+    <div class="arr"><svg width="40" height="16" viewBox="0 0 40 16">
+      <path class="fp" d="M0,8 L32,8" stroke="#a78bfa" stroke-width="2" fill="none"/>
+      <polygon points="32,3 40,8 32,13" fill="#a78bfa"/>
+    </svg></div>
+
+    <div class="box">
+      <div class="icon">🧠</div>
+      <div class="name">Memory<br>Agent</div>
+      <div class="sub">Neo4j · Chroma</div>
+    </div>
+    <div class="arr"><svg width="40" height="16" viewBox="0 0 40 16">
+      <path class="fp" d="M0,8 L32,8" stroke="#a78bfa" stroke-width="2" fill="none"/>
+      <polygon points="32,3 40,8 32,13" fill="#a78bfa"/>
+    </svg></div>
+
+    <div class="box">
+      <div class="icon">📊</div>
+      <div class="name">Entity<br>Tracker</div>
+      <div class="sub">Credibility</div>
+    </div>
+    <div class="arr"><svg width="40" height="16" viewBox="0 0 40 16">
+      <path class="fp" d="M0,8 L32,8" stroke="#a78bfa" stroke-width="2" fill="none"/>
+      <polygon points="32,3 40,8 32,13" fill="#a78bfa"/>
+    </svg></div>
+
+    <div class="box box-pred">
+      <div class="icon">🔮</div>
+      <div class="name">Prediction<br>Agent</div>
+      <div class="sub sub-pred">Trend · Forecast</div>
+    </div>
+
+  </div>
+</body>
+</html>""", height=148, scrolling=False)
 
 st.divider()
 
