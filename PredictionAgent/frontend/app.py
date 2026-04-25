@@ -87,28 +87,6 @@ html, body, [class*="css"] {{
     color: {_text_muted};
     margin-bottom: 0.8rem;
 }}
-/* Team names */
-.team-names {{
-    display: flex;
-    justify-content: center;
-    gap: 0;
-    margin: 0 auto 1.8rem auto;
-    width: 100%;
-}}
-.team-name-item {{
-    flex: 1;
-    text-align: center;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: {_text_soft};
-    letter-spacing: 0.03em;
-    padding: 0 1rem;
-    border-right: 1px solid {_border};
-}}
-.team-name-item:last-child {{
-    border-right: none;
-}}
 
 /* Verdict cards */
 .verdict-card {{
@@ -265,74 +243,7 @@ html, body, [class*="css"] {{
     font-size: 0.85rem;
 }}
 
-/* ── Architecture Diagram ── */
-.arch-wrap {{
-    background: {_bg2};
-    border: 1px solid {_border};
-    border-radius: 16px;
-    padding: 1.5rem 2rem;
-    margin: 1.2rem 0 1.8rem 0;
-    overflow-x: auto;
-}}
-.arch-label {{
-    font-family: 'Space Mono', monospace;
-    font-size: 0.6rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: {_text_muted};
-    margin-bottom: 1.2rem;
-}}
-.arch-row {{
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    flex-wrap: nowrap;
-    min-width: 700px;
-}}
-.arch-box {{
-    background: {"rgba(167,139,250,0.08)" if _dark else "rgba(124,58,237,0.06)"};
-    border: 1px solid {"rgba(167,139,250,0.3)" if _dark else "rgba(124,58,237,0.25)"};
-    border-radius: 10px;
-    padding: 0.55rem 0.9rem;
-    text-align: center;
-    min-width: 100px;
-    flex-shrink: 0;
-}}
-.arch-box-icon {{
-    font-size: 1.3rem;
-    margin-bottom: 3px;
-}}
-.arch-box-name {{
-    font-family: 'Space Mono', monospace;
-    font-size: 0.62rem;
-    font-weight: 700;
-    color: {_accent};
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-}}
-.arch-box-sub {{
-    font-size: 0.58rem;
-    color: {_text_muted};
-    margin-top: 2px;
-    white-space: nowrap;
-}}
-.arch-arrow {{
-    display: flex;
-    align-items: center;
-    padding: 0 2px;
-    flex-shrink: 0;
-}}
 
-/* Animated flowing SVG arrows */
-@keyframes flowDash {{
-    from {{ stroke-dashoffset: 24; }}
-    to   {{ stroke-dashoffset: 0; }}
-}}
-.flow-path {{
-    stroke-dasharray: 6 4;
-    animation: flowDash 0.9s linear infinite;
-}}
 
 </style>
 """, unsafe_allow_html=True)
@@ -663,115 +574,198 @@ with _tc:
         st.session_state["theme"] = "light" if _dark else "dark"
         st.rerun()
 
-# ── Centered hero header ──────────────────────
-_shield_color = "#a78bfa" if _dark else "#7c3aed"
+# ── Centered hero header (inline styles — no CSS classes) ────────
 st.markdown(f"""
-<div style="text-align:center; margin-bottom:0.6rem;">
-    <div style="font-size:3rem; margin-bottom:0.3rem;">🛡️</div>
-    <div class="hero-title">FactGuard</div>
-    <div class="hero-subtitle">Multi-Agent AI Fact-Checking System · Powered by LLMs + Knowledge Graph</div>
-</div>
-<div class="team-names" style="max-width:680px; margin: 0 auto 1.8rem auto;">
-    <div class="team-name-item">Shantam Sharma</div>
-    <div class="team-name-item">Chen Sigen</div>
-    <div class="team-name-item">Ahmed Abdul Wasae</div>
-</div>
-""", unsafe_allow_html=True)
-
-# ── Animated Architecture Diagram ────────────
-_arrow_color  = "#a78bfa" if _dark else "#7c3aed"
-_arrow_tip    = _arrow_color
-
-st.markdown(f"""
-<div class="arch-wrap">
-  <div class="arch-label">🔧 System Architecture — Agent Pipeline</div>
-  <div class="arch-row">
-
-    <!-- 1. Input Guardrail -->
-    <div class="arch-box">
-      <div class="arch-box-icon">🛡️</div>
-      <div class="arch-box-name">Input<br>Guardrail</div>
-      <div class="arch-box-sub">Layer A+B</div>
-    </div>
-
-    <!-- arrow -->
-    <div class="arch-arrow">
-      <svg width="52" height="20" viewBox="0 0 52 20">
-        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
-        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
-      </svg>
-    </div>
-
-    <!-- 2. Preprocessing -->
-    <div class="arch-box">
-      <div class="arch-box-icon">⚙️</div>
-      <div class="arch-box-name">Preprocessing<br>Agent</div>
-      <div class="arch-box-sub">NER · Claims</div>
-    </div>
-
-    <!-- arrow -->
-    <div class="arch-arrow">
-      <svg width="52" height="20" viewBox="0 0 52 20">
-        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
-        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
-      </svg>
-    </div>
-
-    <!-- 3. Fact-Check Agent -->
-    <div class="arch-box" style="border-color:{'rgba(56,189,248,0.4)' if _dark else 'rgba(14,165,233,0.4)'}; background:{'rgba(56,189,248,0.06)' if _dark else 'rgba(14,165,233,0.04)'};">
-      <div class="arch-box-icon">🔍</div>
-      <div class="arch-box-name">Fact-Check<br>Agent</div>
-      <div class="arch-box-sub" style="color:#38bdf8;">LangGraph</div>
-    </div>
-
-    <!-- arrow -->
-    <div class="arch-arrow">
-      <svg width="52" height="20" viewBox="0 0 52 20">
-        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
-        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
-      </svg>
-    </div>
-
-    <!-- 4. Memory Agent -->
-    <div class="arch-box">
-      <div class="arch-box-icon">🧠</div>
-      <div class="arch-box-name">Memory<br>Agent</div>
-      <div class="arch-box-sub">Neo4j · Chroma</div>
-    </div>
-
-    <!-- arrow -->
-    <div class="arch-arrow">
-      <svg width="52" height="20" viewBox="0 0 52 20">
-        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
-        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
-      </svg>
-    </div>
-
-    <!-- 5. Entity Tracker -->
-    <div class="arch-box">
-      <div class="arch-box-icon">📊</div>
-      <div class="arch-box-name">Entity<br>Tracker</div>
-      <div class="arch-box-sub">Credibility</div>
-    </div>
-
-    <!-- arrow -->
-    <div class="arch-arrow">
-      <svg width="52" height="20" viewBox="0 0 52 20">
-        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
-        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
-      </svg>
-    </div>
-
-    <!-- 6. Prediction Agent -->
-    <div class="arch-box" style="border-color:{'rgba(52,211,153,0.4)' if _dark else 'rgba(16,185,129,0.35)'}; background:{'rgba(52,211,153,0.06)' if _dark else 'rgba(16,185,129,0.04)'};">
-      <div class="arch-box-icon">🔮</div>
-      <div class="arch-box-name">Prediction<br>Agent</div>
-      <div class="arch-box-sub" style="color:#34d399;">Trend · Forecast</div>
-    </div>
-
+<div style="text-align:center; margin-bottom:0.5rem; padding-top:0.5rem;">
+  <div style="font-size:3rem; margin-bottom:0.3rem; line-height:1;">🛡️</div>
+  <div style="font-family:'Space Mono',monospace; font-size:2.6rem; font-weight:700;
+              color:{_text_head}; letter-spacing:-1px; margin-bottom:0.35rem; line-height:1.1;">FactGuard</div>
+  <div style="font-size:0.98rem; color:{_text_muted}; margin-bottom:1.2rem;">
+    Multi-Agent AI Fact-Checking System &middot; Powered by LLMs + Knowledge Graph
+  </div>
+  <div style="display:flex; justify-content:center; max-width:640px; margin:0 auto 1.6rem auto;">
+    <div style="flex:1; text-align:center; font-size:0.82rem; font-weight:500;
+                color:{_text_soft}; padding:0.15rem 1rem;
+                border-right:1px solid {_border};">Shantam Sharma</div>
+    <div style="flex:1; text-align:center; font-size:0.82rem; font-weight:500;
+                color:{_text_soft}; padding:0.15rem 1rem;
+                border-right:1px solid {_border};">Chen Sigen</div>
+    <div style="flex:1; text-align:center; font-size:0.82rem; font-weight:500;
+                color:{_text_soft}; padding:0.15rem 1rem;">Ahmed Abdul Wasae</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ── Animated Architecture Diagram (components.html → true iframe, no sanitisation) ──
+import streamlit.components.v1 as _components
+
+_ac   = "#a78bfa" if _dark else "#7c3aed"   # arrow / accent colour
+_boxb = "#1e2535" if _dark else "#ffffff"    # box background
+_bord = "#2d3748" if _dark else "#dde3f0"    # box border
+_wrap = "#151b2e" if _dark else "#f1f5ff"    # diagram wrapper bg
+_lbl  = "#64748b"                            # label colour
+_txt  = "#e2e8f0" if _dark else "#1e293b"    # main text
+
+_arch_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500&display=swap');
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: {_wrap};
+    font-family: 'DM Sans', sans-serif;
+    padding: 16px 20px 12px 20px;
+    overflow-x: hidden;
+  }}
+  .lbl {{
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: {_lbl};
+    margin-bottom: 14px;
+  }}
+  .row {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: nowrap;
+    gap: 0;
+    width: 100%;
+  }}
+  .box {{
+    background: {_boxb};
+    border: 1px solid {_bord};
+    border-radius: 10px;
+    padding: 8px 10px;
+    text-align: center;
+    min-width: 88px;
+    max-width: 110px;
+    flex-shrink: 0;
+  }}
+  .box-fc {{
+    border-color: rgba(56,189,248,0.45);
+    background: {"rgba(56,189,248,0.07)" if _dark else "rgba(14,165,233,0.05)"};
+  }}
+  .box-pred {{
+    border-color: rgba(52,211,153,0.45);
+    background: {"rgba(52,211,153,0.07)" if _dark else "rgba(16,185,129,0.05)"};
+  }}
+  .icon {{ font-size: 1.3rem; margin-bottom: 3px; line-height: 1.3; }}
+  .name {{
+    font-family: 'Space Mono', monospace;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: {_ac};
+    letter-spacing: 0.03em;
+    line-height: 1.4;
+  }}
+  .sub {{
+    font-size: 8.5px;
+    color: {_lbl};
+    margin-top: 3px;
+    line-height: 1.3;
+  }}
+  .sub-fc   {{ color: #38bdf8; }}
+  .sub-pred {{ color: #34d399; }}
+  .arrow {{
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding: 0 2px;
+  }}
+  @keyframes flowDash {{
+    from {{ stroke-dashoffset: 20; }}
+    to   {{ stroke-dashoffset: 0; }}
+  }}
+  .fp {{
+    stroke-dasharray: 5 4;
+    animation: flowDash 0.8s linear infinite;
+  }}
+</style>
+</head>
+<body>
+  <div class="lbl">&#128295; System Architecture &mdash; Agent Pipeline</div>
+  <div class="row">
+
+    <div class="box">
+      <div class="icon">&#128737;&#65039;</div>
+      <div class="name">Input<br>Guardrail</div>
+      <div class="sub">Layer A+B</div>
+    </div>
+
+    <div class="arrow">
+      <svg width="44" height="18" viewBox="0 0 44 18">
+        <path class="fp" d="M0,9 L36,9" stroke="{_ac}" stroke-width="2" fill="none"/>
+        <polygon points="36,4 44,9 36,14" fill="{_ac}"/>
+      </svg>
+    </div>
+
+    <div class="box">
+      <div class="icon">&#9881;&#65039;</div>
+      <div class="name">Preprocessing<br>Agent</div>
+      <div class="sub">NER &middot; Claims</div>
+    </div>
+
+    <div class="arrow">
+      <svg width="44" height="18" viewBox="0 0 44 18">
+        <path class="fp" d="M0,9 L36,9" stroke="{_ac}" stroke-width="2" fill="none"/>
+        <polygon points="36,4 44,9 36,14" fill="{_ac}"/>
+      </svg>
+    </div>
+
+    <div class="box box-fc">
+      <div class="icon">&#128269;</div>
+      <div class="name">Fact-Check<br>Agent</div>
+      <div class="sub sub-fc">LangGraph</div>
+    </div>
+
+    <div class="arrow">
+      <svg width="44" height="18" viewBox="0 0 44 18">
+        <path class="fp" d="M0,9 L36,9" stroke="{_ac}" stroke-width="2" fill="none"/>
+        <polygon points="36,4 44,9 36,14" fill="{_ac}"/>
+      </svg>
+    </div>
+
+    <div class="box">
+      <div class="icon">&#129504;</div>
+      <div class="name">Memory<br>Agent</div>
+      <div class="sub">Neo4j &middot; Chroma</div>
+    </div>
+
+    <div class="arrow">
+      <svg width="44" height="18" viewBox="0 0 44 18">
+        <path class="fp" d="M0,9 L36,9" stroke="{_ac}" stroke-width="2" fill="none"/>
+        <polygon points="36,4 44,9 36,14" fill="{_ac}"/>
+      </svg>
+    </div>
+
+    <div class="box">
+      <div class="icon">&#128202;</div>
+      <div class="name">Entity<br>Tracker</div>
+      <div class="sub">Credibility</div>
+    </div>
+
+    <div class="arrow">
+      <svg width="44" height="18" viewBox="0 0 44 18">
+        <path class="fp" d="M0,9 L36,9" stroke="{_ac}" stroke-width="2" fill="none"/>
+        <polygon points="36,4 44,9 36,14" fill="{_ac}"/>
+      </svg>
+    </div>
+
+    <div class="box box-pred">
+      <div class="icon">&#128302;</div>
+      <div class="name">Prediction<br>Agent</div>
+      <div class="sub sub-pred">Trend &middot; Forecast</div>
+    </div>
+
+  </div>
+</body>
+</html>"""
+
+_components.html(_arch_html, height=155, scrolling=False)
 
 st.divider()
 
