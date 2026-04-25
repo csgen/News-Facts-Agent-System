@@ -613,10 +613,13 @@ _arch_html = f"""<!DOCTYPE html>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500&display=swap');
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  html {{
+    background: {_bg};
+  }}
   body {{
-    background: {_wrap};
+    background: {_bg};
     font-family: 'DM Sans', sans-serif;
-    padding: 16px 20px 12px 20px;
+    padding: 14px 20px 10px 20px;
     overflow-x: hidden;
   }}
   .lbl {{
