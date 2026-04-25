@@ -188,10 +188,22 @@ User input: {input}"""
 def layer_b_check(text: str) -> dict:
     """LLM-based classification. Only called if Layer A passes."""
     try:
+        import os
         from openai import OpenAI
-        from config import settings
 
-        client = OpenAI(api_key=settings.openai_api_key)
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            try:
+                from config import settings
+                api_key = settings.openai_api_key
+            except ImportError:
+                pass
+        if not api_key:
+            logger.warning("[guardrail.B] No OPENAI_API_KEY found — skipping LLM check")
+            print("[guardrail.B] SKIPPED — no API key")
+            return {"blocked": False, "reason": "", "layer": None, "risk": "NONE"}
+
+        client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": LAYER_B_PROMPT.format(input=text[:2000])}],
