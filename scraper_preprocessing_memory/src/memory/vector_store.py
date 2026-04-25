@@ -106,6 +106,16 @@ class VectorStore:
         )
         return len(results["ids"]) > 0
 
+    def get_article_id_by_content_hash(self, content_hash: str):
+        """Return the article_id for an existing content_hash, or None."""
+        results = self._articles.get(
+            where={"content_hash": content_hash},
+            limit=1,
+        )
+        if results["ids"]:
+            return results["ids"][0]
+        return None
+
     # ── Verdicts ────────────────────────────────────────────────────────
 
     def upsert_verdict(
