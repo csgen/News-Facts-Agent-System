@@ -5,9 +5,9 @@ real-time news fact-checking. Three modules live side-by-side as subfolders:
 
 | Folder | Owner | What it does |
 |---|---|---|
-| `scraper_preprocessing_memory/` | Chen (Task 1) | Scrapes news, extracts claims + entities + image captions, ingests to Neo4j + ChromaDB. Also hosts the shared `MemoryAgent` facade used by the other two. |
-| `FakeNewsAgent/` | Teammate (Task 2) | LangGraph fact-check pipeline: cache check → freshness → live search → RAG → verdict. Reads/writes the same DBs via `MemoryAgent`. |
-| `PredictionAgent/` | Teammate (Task 3) | Streamlit UI + entity tracker + trend-based prediction agent. Invokes `FakeNewsAgent` on each user query and renders results. |
+| `scraper_preprocessing_memory/` | Kelvin (Task 1) | Scrapes news, extracts claims + entities + image captions, ingests to Neo4j + ChromaDB. Also hosts the shared `MemoryAgent` facade used by the other two. |
+| `FakeNewsAgent/` | Shantam (Task 2) | LangGraph fact-check pipeline: cache check → freshness → live search → RAG → verdict. Reads/writes the same DBs via `MemoryAgent`. |
+| `PredictionAgent/` | Wasae (Task 3) | Streamlit UI + entity tracker + trend-based prediction agent. Invokes `FakeNewsAgent` on each user query and renders results. |
 
 No logic is duplicated. The three parts communicate through the DB and
 through thin adapter files in `PredictionAgent/agents/` (`fact_check_agent.py`,
@@ -39,7 +39,7 @@ docker compose -f docker/docker-compose.yml build
 
 ---
 
-## Mode A — Fully cloud (the recommended default for Chen)
+## Mode A — Fully cloud (the recommended default for Kelvin)
 
 All databases and LLMs are cloud services. Zero local infra.
 
@@ -170,20 +170,20 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml \
 
 ```
 news_facts_system/
-├── scraper_preprocessing_memory/   # Chen's repo (near-verbatim)
+├── scraper_preprocessing_memory/   # Kleivn's repo (near-verbatim)
 │   └── src/
 │       ├── pipeline.py             # `python -m src.pipeline` entry
 │       ├── memory/agent.py         # Unified MemoryAgent — the single DB facade
 │       ├── memory/vector_store.py  # Chroma (Cloud / HTTP / embedded) + source_credibility
 │       └── memory/graph_store.py   # Neo4j + extended queries used by all 3 tasks
 │
-├── FakeNewsAgent/                  # Teammate repo (near-verbatim)
+├── FakeNewsAgent/                  # Shantam's repo (near-verbatim)
 │   └── fact_check_agent/src/
 │       ├── _bootstrap.py           # Points updated at sibling ../../scraper_preprocessing_memory
 │       ├── pipeline.py             # run_fact_check(PreprocessingOutput)
 │       └── graph/                  # LangGraph nodes + routing
 │
-├── PredictionAgent/                # Teammate repo (task3 branch) + 2 adapter files
+├── PredictionAgent/                # Wasae's repo (task3 branch) + 2 adapter files
 │   ├── frontend/app.py             # Streamlit UI
 │   ├── agents/
 │   │   ├── fact_check_agent.py     # NEW adapter — wraps FakeNewsAgent's pipeline
