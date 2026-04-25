@@ -47,6 +47,7 @@ class VectorStore:
         source_id: str,
         status: str,
         extracted_at: str,
+        topic_text: str = "",
     ) -> None:
         self._claims.upsert(
             ids=[claim_id],
@@ -57,6 +58,7 @@ class VectorStore:
                 "source_id": source_id,
                 "status": status,
                 "extracted_at": extracted_at,
+                "topic_text": topic_text,
             }],
         )
 

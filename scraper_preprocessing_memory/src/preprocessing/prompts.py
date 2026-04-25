@@ -7,11 +7,16 @@ A falsifiable claim is a concrete statement that can be verified as true or fals
 If there is explicit expression of the statement source, it should also be included in the claim.
 Exclude opinions, questions, and vague statements.
 
-For each claim, classify its type:
-- "statistical": involves numbers, percentages, quantities
-- "attribution": attributes an action or statement to a specific entity
-- "causal": asserts a cause-effect relationship
-- "predictive": makes a prediction about the future
+For each claim, also classify:
+1. type — one of:
+   - "statistical": involves numbers, percentages, quantities
+   - "attribution": attributes an action or statement to a specific entity
+   - "causal": asserts a cause-effect relationship
+   - "predictive": makes a prediction about the future
+2. topic_text — exactly ONE coarse topic category from this list:
+   technology | geopolitics | financial | health | science |
+   sports | entertainment | climate | crime | art
+   Pick the single best fit. Suggest one word only if no category applies.
 
 Article title: {title}
 
@@ -21,7 +26,11 @@ Article text:
 Return a JSON object with this structure:
 {{
   "claims": [
-    {{"text": "the exact falsifiable claim", "type": "statistical|attribution|causal|predictive"}}
+    {{
+      "text": "the exact falsifiable claim",
+      "type": "statistical|attribution|causal|predictive",
+      "topic_text": "technology|geopolitics|financial|health|science|sports|entertainment|climate|crime|art|"
+    }}
   ]
 }}
 

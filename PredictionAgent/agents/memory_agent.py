@@ -2,7 +2,7 @@
 
 The real implementation lives at `../../scraper_preprocessing_memory/src/memory/agent.py`.
 This file only:
-  1. Adjusts sys.path so scapper's `src.*` imports resolve.
+  1. Adjusts sys.path so scraper's `src.*` imports resolve.
   2. Re-exports `MemoryAgent` plus a process-level `get_memory()` singleton.
 
 Usage:

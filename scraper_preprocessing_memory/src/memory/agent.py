@@ -133,6 +133,7 @@ class MemoryAgent:
                 "claim_id": claim.claim_id,
                 "claim_text": claim.claim_text,
                 "claim_type": claim.claim_type or "",
+                "topic_text": claim.topic_text,
                 "extracted_at": claim.extracted_at.isoformat(),
                 "status": claim.status,
                 "entities": [
@@ -178,6 +179,7 @@ class MemoryAgent:
                 source_id=output.article.source_id,
                 status=claim.status,
                 extracted_at=claim.extracted_at.isoformat(),
+                topic_text=claim.topic_text,
             )
 
         # Image caption

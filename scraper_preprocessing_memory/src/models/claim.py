@@ -26,6 +26,11 @@ class Claim(BaseModel):
     article_id: str
     claim_text: str
     claim_type: Optional[str] = None  # "statistical", "attribution", "causal", "predictive"
+    # Coarse one-word topic category. Closed enum (LLM-classified during isolation):
+    #   technology | geopolitics | financial | health | science |
+    #   sports | entertainment | climate | crime | other
+    # Default "" preserves backward-compat for fixtures and the synthetic-input path.
+    topic_text: str = ""
     extracted_at: datetime
     status: str = "pending"  # "pending", "verified", "expired"
     entities: list[MentionSentiment] = Field(default_factory=list)

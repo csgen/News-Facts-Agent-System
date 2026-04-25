@@ -136,6 +136,7 @@ class PreprocessingAgent:
                 article_id=article_id,
                 claim_text=raw_claim["text"],
                 claim_type=raw_claim.get("type"),
+                topic_text=raw_claim.get("topic_text", ""),
                 extracted_at=now,
                 status="pending",
                 entities=mentions,
