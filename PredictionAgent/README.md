@@ -209,10 +209,105 @@ Real datasets are loaded via HuggingFace `datasets` (install with `pip install d
 
 ---
 
+## Input Guardrail (Task 3)
+
+All user inputs are screened through a two-layer defence before reaching the fact-checking pipeline.
+
+### Layer A — Rule-Based (instant, zero cost)
+
+Regex patterns catch known attack patterns without any API call:
+
+| Check | Examples blocked |
+|---|---|
+| Prompt injection | `ignore previous instructions`, `[INST]`, `<\|im_start\|>` |
+| Jailbreak / persona | `DAN`, `developer mode`, `god mode`, `roleplay as` |
+| System prompt leak | `repeat your system prompt`, `what were your instructions` |
+| PII detection | credit cards, SSNs, API keys (`sk-…`), passwords |
+| Hate / harmful | bomb-making, violent calls to action |
+| Gibberish / spam | low alpha-ratio inputs, keyboard spam |
+| Length bounds | < 5 chars or > 5 000 chars |
+
+### Layer B — LLM Classifier (GPT-4o-mini, ~300 ms)
+
+Only fires when Layer A passes. Classifies inputs as `SAFE / UNSAFE` with a `NONE / LOW / MEDIUM / HIGH` risk score. Catches subtle attacks that regex cannot — educational framing, indirect persona substitution, base64-encoded injections.
+
+**Return schema:**
+```json
+{"blocked": true, "reason": "…", "layer": "A", "risk": "HIGH"}
+```
+
+### Guardrail Benchmark
+
+Run the evaluation suite:
+```bash
+python -m evaluation.guardrail_benchmark          # Layer A + B
+python -m evaluation.guardrail_benchmark --no-llm  # Layer A only
+```
+
+44 test cases across 8 categories:
+
+| Category | Cases | What is tested |
+|---|---|---|
+| Prompt Injection | 6 | Classic overrides, delimiter attacks, ChatML tokens |
+| Jailbreak | 6 | DAN, persona hijack, developer/god mode, roleplay |
+| Prompt Extraction | 4 | Direct prompt leak, instruction extraction |
+| PII | 4 | SSN, credit card, API key, password |
+| Harmful Content | 2 | Bomb-making, violent content |
+| Gibberish/Spam | 2 | Random chars, too-short input |
+| Garak-Style Probes | 6 | Base64 encoding, GCG suffix, continuation, simulation |
+| Legitimate Inputs | 10 | Real news claims, URLs, controversial-but-genuine topics |
+
+Metrics reported: **True Positive Rate**, **False Positive Rate**, accuracy, per-category breakdown, Layer A vs B catch breakdown, latency.
+
+---
+
+## Entity Credibility Formula (Task 3)
+
+### Credibility Score
+
+Recency-weighted with Bayesian volume shrinkage — few claims pull the score toward the neutral prior (0.5).
+
+```
+label_score  : supported=1.0, misleading=0.35, refuted=0.0
+time_decay_i : exp(−λ × days_ago),   λ = ln(2)/14  (14-day half-life)
+weight_i     : confidence_i × time_decay_i
+
+evidence     = Σ(label_score_i × weight_i) / Σ(weight_i)
+
+volume_factor = 1 − exp(−n/3)         # 0.63 at n=1, 0.86 at n=3, 0.99 at n=10
+credibility   = 0.5×(1−volume_factor) + evidence×volume_factor
+```
+
+### Sentiment Score
+
+Recency-weighted in [−1, +1]: `positive→+1, neutral→0, negative→−1`, same 14-day half-life.
+
+---
+
+## Prediction Agent (Task 3)
+
+After 3 or more credibility snapshots are stored for an entity, the Prediction Agent runs automatically:
+
+1. Loads the N most recent `CredibilitySnapshot` nodes from Neo4j
+2. Fits a linear regression on `(snapshot_index → credibility_score)`
+3. Extrapolates to a 7-day horizon
+4. Applies threshold rules (drop < 0.3 → "credibility likely to fall critically")
+5. Writes a `Prediction` node to Neo4j with `prediction_text`, `confidence`, and `deadline`
+
+The Streamlit dashboard shows open predictions under the **Entity & Trend** tab.
+
+---
+
 ## Team
 
-| Task | Role | Branch |
+| Name | Task | Role |
 |---|---|---|
-| Task 1 | Data & Memory Engineer | `data_memory_dev` |
-| Task 2 | Core Agentic AI Engineer | `main` (FakeNewsAgent) |
-| Task 3 | Full-Stack & Evaluation Engineer | `task3` |
+| Shantam Sharma | Task 2 | Core Agentic AI Engineer |
+| Chen Sigen | Task 1 | Data & Memory Engineer |
+| Ahmed Abdul Wasae | Task 3 | Full-Stack & Evaluation Engineer |
+
+| Task | Branch |
+|---|---|
+| Task 1 | `data_memory_dev` |
+| Task 2 | `main` (FakeNewsAgent) |
+| Task 3 | `feature/input-guardrail` |

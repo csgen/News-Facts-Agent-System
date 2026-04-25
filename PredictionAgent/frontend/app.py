@@ -29,66 +29,110 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-# CUSTOM CSS — original UI design preserved exactly
+# THEME STATE
 # ─────────────────────────────────────────────
-st.markdown("""
+if "theme" not in st.session_state:
+    st.session_state["theme"] = "dark"
+
+_dark = st.session_state["theme"] == "dark"
+
+# ─────────────────────────────────────────────
+# CUSTOM CSS — theme-aware
+# ─────────────────────────────────────────────
+_bg          = "#0a0e1a"     if _dark else "#f0f4ff"
+_bg2         = "#1e2535"     if _dark else "#ffffff"
+_bg3         = "#151b2e"     if _dark else "#f8faff"
+_border      = "#2d3748"     if _dark else "#dde3f0"
+_text        = "#e2e8f0"     if _dark else "#1e293b"
+_text_muted  = "#64748b"     if _dark else "#64748b"
+_text_soft   = "#94a3b8"     if _dark else "#475569"
+_text_head   = "#f0f4ff"     if _dark else "#0f172a"
+_accent      = "#a78bfa"     if _dark else "#7c3aed"
+_tab_bg      = "#1e2535"     if _dark else "#e8ecf5"
+_tab_sel     = "#2d3748"     if _dark else "#ffffff"
+_input_bg    = "#1e2535"     if _dark else "#ffffff"
+_section_bdr = "#1e2535"     if _dark else "#dde3f0"
+
+st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;700&display=swap');
 
 /* Global */
-html, body, [class*="css"] {
+html, body, [class*="css"] {{
     font-family: 'DM Sans', sans-serif;
-    background-color: #0a0e1a;
-    color: #e2e8f0;
-}
+    background-color: {_bg};
+    color: {_text};
+}}
 
 /* Hide Streamlit branding */
-#MainMenu, footer, header {visibility: hidden;}
+#MainMenu, footer, header {{visibility: hidden;}}
 
 /* Main container */
-.main .block-container {
+.main .block-container {{
     padding: 2rem 3rem;
     max-width: 1400px;
-}
+}}
 
 /* Hero title */
-.hero-title {
+.hero-title {{
     font-family: 'Space Mono', monospace;
     font-size: 2.8rem;
     font-weight: 700;
-    color: #f0f4ff;
+    color: {_text_head};
     letter-spacing: -1px;
-    margin-bottom: 0.2rem;
-}
-.hero-subtitle {
+    margin-bottom: 0.4rem;
+}}
+.hero-subtitle {{
     font-size: 1rem;
-    color: #64748b;
-    margin-bottom: 2rem;
-}
+    color: {_text_muted};
+    margin-bottom: 0.8rem;
+}}
+/* Team names */
+.team-names {{
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin: 0 auto 1.8rem auto;
+    width: 100%;
+}}
+.team-name-item {{
+    flex: 1;
+    text-align: center;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: {_text_soft};
+    letter-spacing: 0.03em;
+    padding: 0 1rem;
+    border-right: 1px solid {_border};
+}}
+.team-name-item:last-child {{
+    border-right: none;
+}}
 
 /* Verdict cards */
-.verdict-card {
-    background: linear-gradient(135deg, #1e2535 0%, #151b2e 100%);
-    border: 1px solid #2d3748;
+.verdict-card {{
+    background: linear-gradient(135deg, {_bg2} 0%, {_bg3} 100%);
+    border: 1px solid {_border};
     border-radius: 16px;
     padding: 1.5rem;
     margin-bottom: 1rem;
-}
-.verdict-supported {
+}}
+.verdict-supported {{
     border-left: 4px solid #10b981;
     box-shadow: 0 0 20px rgba(16,185,129,0.08);
-}
-.verdict-refuted {
+}}
+.verdict-refuted {{
     border-left: 4px solid #ef4444;
     box-shadow: 0 0 20px rgba(239,68,68,0.08);
-}
-.verdict-misleading {
+}}
+.verdict-misleading {{
     border-left: 4px solid #f59e0b;
     box-shadow: 0 0 20px rgba(245,158,11,0.08);
-}
+}}
 
 /* Badge */
-.badge {
+.badge {{
     display: inline-block;
     padding: 4px 14px;
     border-radius: 999px;
@@ -97,13 +141,13 @@ html, body, [class*="css"] {
     font-family: 'Space Mono', monospace;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-}
-.badge-supported { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
-.badge-refuted { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
-.badge-misleading { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+}}
+.badge-supported {{ background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }}
+.badge-refuted {{ background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }}
+.badge-misleading {{ background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }}
 
 /* Section headers */
-.section-header {
+.section-header {{
     font-family: 'Space Mono', monospace;
     font-size: 0.7rem;
     letter-spacing: 0.2em;
@@ -111,82 +155,83 @@ html, body, [class*="css"] {
     color: #475569;
     margin-bottom: 1rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid #1e2535;
-}
+    border-bottom: 1px solid {_section_bdr};
+}}
 
 /* Info metric */
-.metric-box {
-    background: #1e2535;
+.metric-box {{
+    background: {_bg2};
     border-radius: 12px;
     padding: 1rem 1.2rem;
     text-align: center;
-}
-.metric-value {
+}}
+.metric-value {{
     font-family: 'Space Mono', monospace;
     font-size: 2rem;
     font-weight: 700;
-    color: #a78bfa;
-}
-.metric-label {
+    color: {_accent};
+}}
+.metric-label {{
     font-size: 0.75rem;
     color: #64748b;
     margin-top: 2px;
-}
+}}
 
 /* Bias highlight */
-.bias-text {
-    background: #1e2535;
+.bias-text {{
+    background: {_bg2};
     border-radius: 12px;
     padding: 1.2rem;
     line-height: 2;
     font-size: 0.95rem;
-}
-.highlight-high { background: rgba(239,68,68,0.25); border-radius: 4px; padding: 1px 4px; }
-.highlight-med { background: rgba(245,158,11,0.2); border-radius: 4px; padding: 1px 4px; }
-.highlight-low { background: rgba(99,102,241,0.15); border-radius: 4px; padding: 1px 4px; }
+    color: {_text};
+}}
+.highlight-high {{ background: rgba(239,68,68,0.25); border-radius: 4px; padding: 1px 4px; }}
+.highlight-med {{ background: rgba(245,158,11,0.2); border-radius: 4px; padding: 1px 4px; }}
+.highlight-low {{ background: rgba(99,102,241,0.15); border-radius: 4px; padding: 1px 4px; }}
 
 /* Source pill */
-.source-pill {
+.source-pill {{
     display: inline-block;
-    background: #1e2535;
-    border: 1px solid #2d3748;
+    background: {_bg2};
+    border: 1px solid {_border};
     border-radius: 8px;
     padding: 6px 14px;
     font-size: 0.8rem;
     margin: 4px;
-    color: #94a3b8;
-}
+    color: {_text_soft};
+}}
 
 /* Tab styling override */
-.stTabs [data-baseweb="tab-list"] {
+.stTabs [data-baseweb="tab-list"] {{
     gap: 4px;
-    background: #1e2535;
+    background: {_tab_bg};
     padding: 6px;
     border-radius: 12px;
-}
-.stTabs [data-baseweb="tab"] {
+}}
+.stTabs [data-baseweb="tab"] {{
     border-radius: 8px;
     font-family: 'Space Mono', monospace;
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     color: #64748b;
-}
-.stTabs [aria-selected="true"] {
-    background: #2d3748 !important;
-    color: #a78bfa !important;
-}
+}}
+.stTabs [aria-selected="true"] {{
+    background: {_tab_sel} !important;
+    color: {_accent} !important;
+}}
 
 /* Input styling */
-.stTextArea textarea, .stTextInput input {
-    background: #1e2535 !important;
-    border: 1px solid #2d3748 !important;
+.stTextArea textarea, .stTextInput input {{
+    background: {_input_bg} !important;
+    border: 1px solid {_border} !important;
     border-radius: 10px !important;
-    color: #e2e8f0 !important;
+    color: {_text} !important;
     font-family: 'DM Sans', sans-serif !important;
-}
+}}
 
 /* Button */
-.stButton > button {
+.stButton > button {{
     background: linear-gradient(135deg, #7c3aed, #4f46e5);
     color: white;
     border: none;
@@ -197,28 +242,98 @@ html, body, [class*="css"] {
     letter-spacing: 0.05em;
     padding: 0.6rem 2rem;
     transition: opacity 0.2s;
-}
-.stButton > button:hover {
+}}
+.stButton > button:hover {{
     opacity: 0.85;
-}
+}}
 
 /* Image mismatch warning */
-.img-mismatch-warning {
+.img-mismatch-warning {{
     background: rgba(239,68,68,0.1);
     border: 1px solid rgba(239,68,68,0.3);
     border-radius: 10px;
     padding: 0.8rem 1rem;
     color: #fca5a5;
     font-size: 0.85rem;
-}
-.img-match-ok {
+}}
+.img-match-ok {{
     background: rgba(16,185,129,0.1);
     border: 1px solid rgba(16,185,129,0.3);
     border-radius: 10px;
     padding: 0.8rem 1rem;
     color: #6ee7b7;
     font-size: 0.85rem;
-}
+}}
+
+/* ── Architecture Diagram ── */
+.arch-wrap {{
+    background: {_bg2};
+    border: 1px solid {_border};
+    border-radius: 16px;
+    padding: 1.5rem 2rem;
+    margin: 1.2rem 0 1.8rem 0;
+    overflow-x: auto;
+}}
+.arch-label {{
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: {_text_muted};
+    margin-bottom: 1.2rem;
+}}
+.arch-row {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    flex-wrap: nowrap;
+    min-width: 700px;
+}}
+.arch-box {{
+    background: {"rgba(167,139,250,0.08)" if _dark else "rgba(124,58,237,0.06)"};
+    border: 1px solid {"rgba(167,139,250,0.3)" if _dark else "rgba(124,58,237,0.25)"};
+    border-radius: 10px;
+    padding: 0.55rem 0.9rem;
+    text-align: center;
+    min-width: 100px;
+    flex-shrink: 0;
+}}
+.arch-box-icon {{
+    font-size: 1.3rem;
+    margin-bottom: 3px;
+}}
+.arch-box-name {{
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: {_accent};
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}}
+.arch-box-sub {{
+    font-size: 0.58rem;
+    color: {_text_muted};
+    margin-top: 2px;
+    white-space: nowrap;
+}}
+.arch-arrow {{
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+    flex-shrink: 0;
+}}
+
+/* Animated flowing SVG arrows */
+@keyframes flowDash {{
+    from {{ stroke-dashoffset: 24; }}
+    to   {{ stroke-dashoffset: 0; }}
+}}
+.flow-path {{
+    stroke-dasharray: 6 4;
+    animation: flowDash 0.9s linear infinite;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -537,17 +652,124 @@ def render_bias_chart(bias_score: float):
 
 
 # ─────────────────────────────────────────────
-# APP LAYOUT — original UI design preserved exactly
+# APP LAYOUT
 # ─────────────────────────────────────────────
 
-# Header
-st.markdown("""
-<div style="display:flex; align-items:center; gap:12px; margin-bottom:0.5rem;">
-    <span style="font-size:2.5rem;">🛡️</span>
-    <div>
-        <div class="hero-title">FactGuard</div>
-        <div class="hero-subtitle">Multi-Agent AI Fact-Checking System · Powered by LLMs + Knowledge Graph</div>
+# ── Theme toggle (top-right corner) ──────────
+_theme_icon = "☀️  Light" if _dark else "🌙  Dark"
+_, _tc = st.columns([10, 1])
+with _tc:
+    if st.button(_theme_icon, key="theme_toggle"):
+        st.session_state["theme"] = "light" if _dark else "dark"
+        st.rerun()
+
+# ── Centered hero header ──────────────────────
+_shield_color = "#a78bfa" if _dark else "#7c3aed"
+st.markdown(f"""
+<div style="text-align:center; margin-bottom:0.6rem;">
+    <div style="font-size:3rem; margin-bottom:0.3rem;">🛡️</div>
+    <div class="hero-title">FactGuard</div>
+    <div class="hero-subtitle">Multi-Agent AI Fact-Checking System · Powered by LLMs + Knowledge Graph</div>
+</div>
+<div class="team-names" style="max-width:680px; margin: 0 auto 1.8rem auto;">
+    <div class="team-name-item">Shantam Sharma</div>
+    <div class="team-name-item">Chen Sigen</div>
+    <div class="team-name-item">Ahmed Abdul Wasae</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Animated Architecture Diagram ────────────
+_arrow_color  = "#a78bfa" if _dark else "#7c3aed"
+_arrow_tip    = _arrow_color
+
+st.markdown(f"""
+<div class="arch-wrap">
+  <div class="arch-label">🔧 System Architecture — Agent Pipeline</div>
+  <div class="arch-row">
+
+    <!-- 1. Input Guardrail -->
+    <div class="arch-box">
+      <div class="arch-box-icon">🛡️</div>
+      <div class="arch-box-name">Input<br>Guardrail</div>
+      <div class="arch-box-sub">Layer A+B</div>
     </div>
+
+    <!-- arrow -->
+    <div class="arch-arrow">
+      <svg width="52" height="20" viewBox="0 0 52 20">
+        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
+        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
+      </svg>
+    </div>
+
+    <!-- 2. Preprocessing -->
+    <div class="arch-box">
+      <div class="arch-box-icon">⚙️</div>
+      <div class="arch-box-name">Preprocessing<br>Agent</div>
+      <div class="arch-box-sub">NER · Claims</div>
+    </div>
+
+    <!-- arrow -->
+    <div class="arch-arrow">
+      <svg width="52" height="20" viewBox="0 0 52 20">
+        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
+        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
+      </svg>
+    </div>
+
+    <!-- 3. Fact-Check Agent -->
+    <div class="arch-box" style="border-color:{'rgba(56,189,248,0.4)' if _dark else 'rgba(14,165,233,0.4)'}; background:{'rgba(56,189,248,0.06)' if _dark else 'rgba(14,165,233,0.04)'};">
+      <div class="arch-box-icon">🔍</div>
+      <div class="arch-box-name">Fact-Check<br>Agent</div>
+      <div class="arch-box-sub" style="color:#38bdf8;">LangGraph</div>
+    </div>
+
+    <!-- arrow -->
+    <div class="arch-arrow">
+      <svg width="52" height="20" viewBox="0 0 52 20">
+        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
+        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
+      </svg>
+    </div>
+
+    <!-- 4. Memory Agent -->
+    <div class="arch-box">
+      <div class="arch-box-icon">🧠</div>
+      <div class="arch-box-name">Memory<br>Agent</div>
+      <div class="arch-box-sub">Neo4j · Chroma</div>
+    </div>
+
+    <!-- arrow -->
+    <div class="arch-arrow">
+      <svg width="52" height="20" viewBox="0 0 52 20">
+        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
+        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
+      </svg>
+    </div>
+
+    <!-- 5. Entity Tracker -->
+    <div class="arch-box">
+      <div class="arch-box-icon">📊</div>
+      <div class="arch-box-name">Entity<br>Tracker</div>
+      <div class="arch-box-sub">Credibility</div>
+    </div>
+
+    <!-- arrow -->
+    <div class="arch-arrow">
+      <svg width="52" height="20" viewBox="0 0 52 20">
+        <path class="flow-path" d="M0,10 L44,10" stroke="{_arrow_color}" stroke-width="2" fill="none"/>
+        <polygon points="44,5 52,10 44,15" fill="{_arrow_tip}"/>
+      </svg>
+    </div>
+
+    <!-- 6. Prediction Agent -->
+    <div class="arch-box" style="border-color:{'rgba(52,211,153,0.4)' if _dark else 'rgba(16,185,129,0.35)'}; background:{'rgba(52,211,153,0.06)' if _dark else 'rgba(16,185,129,0.04)'};">
+      <div class="arch-box-icon">🔮</div>
+      <div class="arch-box-name">Prediction<br>Agent</div>
+      <div class="arch-box-sub" style="color:#34d399;">Trend · Forecast</div>
+    </div>
+
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
