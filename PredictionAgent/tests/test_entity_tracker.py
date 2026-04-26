@@ -9,7 +9,6 @@ fast and require no external services. They cover:
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
 from agents.entity_tracker import compute_credibility_score
 
 
