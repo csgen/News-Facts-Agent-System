@@ -194,6 +194,11 @@ def test_siglip_score_surfaces_in_return_value():
 # Portrait photo: score 0.77 for "person's face portrait photo"
 # All mismatching pairs: score 0.000
 
+# NOTE: These paths are dev-machine specific (set up on the original author's
+# laptop). The tests below are marked @pytest.mark.integration so they auto-skip
+# in CI. To run them locally, override _GRACE_HOPPER and _PORTRAIT with paths
+# to images on your machine, then invoke:
+#     pytest -m integration FakeNewsAgent/fact_check_agent/tests/test_cross_modal_tool.py
 _GRACE_HOPPER = (
     "/home/shantam/fakenews/.venv/lib/python3.10/site-packages"
     "/matplotlib/mpl-data/sample_data/grace_hopper.jpg"
@@ -208,6 +213,7 @@ def _real_image_uri(path: str) -> str:
     return f"data:image/jpeg;base64,{b64}"
 
 
+@pytest.mark.integration
 def test_siglip_check_returns_valid_shape():
     """_siglip_check returns a dict with conflict (bool), explanation, and siglip_score (float 0-1)."""
     uri = _real_image_uri(_GRACE_HOPPER)
@@ -222,6 +228,7 @@ def test_siglip_check_returns_valid_shape():
     assert 0.0 <= result["siglip_score"] <= 1.0
 
 
+@pytest.mark.integration
 def test_siglip_matching_pair_above_threshold():
     """Grace Hopper photo scores above threshold (0.10) for correct description."""
     uri = _real_image_uri(_GRACE_HOPPER)
@@ -232,6 +239,7 @@ def test_siglip_matching_pair_above_threshold():
     assert result["siglip_score"] > 0.10
 
 
+@pytest.mark.integration
 def test_siglip_mismatch_scores_near_zero():
     """Grace Hopper photo + ocean claim scores near 0 (clear mismatch)."""
     uri = _real_image_uri(_GRACE_HOPPER)
@@ -242,6 +250,7 @@ def test_siglip_mismatch_scores_near_zero():
     assert result["siglip_score"] < 0.05
 
 
+@pytest.mark.integration
 def test_siglip_portrait_match():
     """Portrait photo scores high for 'person's face portrait photo'."""
     uri = _real_image_uri(_PORTRAIT)
@@ -252,6 +261,7 @@ def test_siglip_portrait_match():
     assert result["conflict"] is False
 
 
+@pytest.mark.integration
 def test_siglip_portrait_wildfire_mismatch():
     """Portrait photo + wildfire claim scores near zero."""
     uri = _real_image_uri(_PORTRAIT)
@@ -260,6 +270,7 @@ def test_siglip_portrait_wildfire_mismatch():
     assert result["conflict"] is True
 
 
+@pytest.mark.integration
 def test_siglip_model_cached_across_calls():
     """_load_siglip is called only once even for multiple checks (lru_cache)."""
     from fact_check_agent.src.tools.cross_modal_tool import _load_siglip

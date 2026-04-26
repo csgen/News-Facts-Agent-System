@@ -194,6 +194,24 @@ def make_memory_mock_with_similar(claims=None):
     return memory
 
 
+def _make_settings(use_graph_rag=False, use_cross_encoder=False, top_k=5):
+    """Build a settings MagicMock with all guards explicitly set false.
+
+    MagicMock's default behaviour is to return a fresh MagicMock for any unset
+    attribute, and a MagicMock is truthy. That means `if settings.offline_mode:`
+    in query_memory short-circuits to True unless we set offline_mode=False
+    here, causing tests to fail with "expected call ... Called 0 times."
+    """
+    s = MagicMock()
+    s.use_graph_rag       = use_graph_rag
+    s.use_cross_encoder   = use_cross_encoder
+    s.cross_encoder_model = "" if not use_cross_encoder else "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    s.reranker_top_k      = top_k
+    s.offline_mode        = False
+    s.dry_run             = False
+    return s
+
+
 def make_fci(claim_id="clm_001", claim_text="vaccines cause autism"):
     from fact_check_agent.src.models.schemas import FactCheckInput
     return FactCheckInput(
@@ -212,11 +230,7 @@ def test_query_memory_graph_rag_disabled_no_graph_calls():
     from fact_check_agent.src.graph.nodes import query_memory
 
     memory   = make_memory_mock_with_similar()
-    settings = MagicMock()
-    settings.use_graph_rag    = False
-    settings.use_cross_encoder= False
-    settings.cross_encoder_model = ""
-    settings.reranker_top_k   = 5
+    settings = _make_settings(use_graph_rag=False)
 
     state = {"input": make_fci()}
     with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
@@ -240,11 +254,7 @@ def test_query_memory_graph_rag_enabled_calls_entity_expansion():
         make_claim("c2", "vaccines are safe", distance=0.0)
     ]
 
-    settings = MagicMock()
-    settings.use_graph_rag     = True
-    settings.use_cross_encoder = False
-    settings.cross_encoder_model = ""
-    settings.reranker_top_k    = 5
+    settings = _make_settings(use_graph_rag=True)
 
     state = {"input": make_fci()}
     with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
@@ -264,11 +274,7 @@ def test_query_memory_graph_rag_no_vector_results_skips_expansion():
     from fact_check_agent.src.graph.nodes import query_memory
 
     memory   = make_memory_mock_with_similar([])  # empty vector results
-    settings = MagicMock()
-    settings.use_graph_rag     = True
-    settings.use_cross_encoder = False
-    settings.cross_encoder_model = ""
-    settings.reranker_top_k    = 5
+    settings = _make_settings(use_graph_rag=True)
 
     state = {"input": make_fci()}
     with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
@@ -285,11 +291,7 @@ def test_query_memory_cross_encoder_called_when_flag_set():
     similar = [make_claim("c1"), make_claim("c2")]
     memory  = make_memory_mock_with_similar(similar)
 
-    settings = MagicMock()
-    settings.use_graph_rag     = False
-    settings.use_cross_encoder = True
-    settings.cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    settings.reranker_top_k    = 5
+    settings = _make_settings(use_cross_encoder=True)
 
     state = {"input": make_fci()}
     with patch("fact_check_agent.src.tools.reranker._load_cross_encoder") as mock_load, \
