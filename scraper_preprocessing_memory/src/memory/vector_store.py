@@ -62,6 +62,10 @@ class VectorStore:
             }],
         )
 
+    def update_claim_status(self, claim_id: str, status: str) -> None:
+        """Patch the status metadata field on an existing claim — no re-embedding needed."""
+        self._claims.update(ids=[claim_id], metadatas=[{"status": status}])
+
     def search_similar_claims(
         self, query_embedding: list[float], top_k: int = 5
     ) -> dict:
@@ -128,7 +132,6 @@ class VectorStore:
         claim_id: str,
         label: str,
         confidence: float,
-        bias_score: float,
         image_mismatch: bool,
         verified_at: str,
     ) -> None:
@@ -140,7 +143,6 @@ class VectorStore:
                 "claim_id": claim_id,
                 "label": label,
                 "confidence": confidence,
-                "bias_score": bias_score,
                 "image_mismatch": image_mismatch,
                 "verified_at": verified_at,
                 "status": "active",
@@ -207,12 +209,11 @@ class VectorStore:
         document: str,
         source_id: str,
         credibility: float,
-        bias: float,
         verdict_label: str,
         verdict_id: str,
         created_at: str,
     ) -> None:
-        """Append a (source, topic, credibility, bias) observation."""
+        """Append a (source, topic, credibility) observation."""
         self._source_credibility.upsert(
             ids=[point_id],
             embeddings=[embedding],
@@ -220,7 +221,6 @@ class VectorStore:
             metadatas=[{
                 "source_id": source_id,
                 "credibility": credibility,
-                "bias": bias,
                 "verdict_label": verdict_label,
                 "verdict_id": verdict_id,
                 "created_at": created_at,

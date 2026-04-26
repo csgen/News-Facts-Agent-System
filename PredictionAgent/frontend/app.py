@@ -232,7 +232,6 @@ def get_real_verdict(query: str) -> dict:
             "confidence":       output.confidence_score / 100,
             "claim_text":       query[:200],
             "evidence_summary": output.reasoning,
-            "bias_score":       output.bias_score,
             "image_mismatch":   output.cross_modal_flag,
             "image_url":        None,
             "vlm_caption":      output.cross_modal_explanation or "",
@@ -248,7 +247,6 @@ def get_real_verdict(query: str) -> dict:
             "confidence":       0.0,
             "claim_text":       query[:200],
             "evidence_summary": f"Pipeline error: {e}",
-            "bias_score":       0.5,
             "image_mismatch":   False,
             "image_url":        None,
             "vlm_caption":      "",
@@ -411,36 +409,6 @@ def render_credibility_chart(df: pd.DataFrame, entity_name: str):
     return fig
 
 
-def render_bias_chart(bias_score: float):
-    import random
-    categories = ["Political", "Emotional", "Framing", "Source", "Overall"]
-    scores = [
-        round(random.uniform(0.1, bias_score + 0.1), 2),
-        round(random.uniform(0.1, bias_score + 0.2), 2),
-        round(random.uniform(0.1, bias_score), 2),
-        round(random.uniform(0.05, max(0.06, bias_score - 0.05)), 2),
-        bias_score
-    ]
-    scores = [min(1.0, max(0.0, s)) for s in scores]
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=scores, y=categories, orientation="h",
-        marker=dict(color=scores,
-                    colorscale=[[0, "#10b981"], [0.5, "#f59e0b"], [1, "#ef4444"]],
-                    showscale=False),
-        text=[f"{s:.0%}" for s in scores],
-        textposition="outside",
-        textfont=dict(color="#94a3b8", size=11)
-    ))
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#94a3b8", family="DM Sans"),
-        xaxis=dict(range=[0, 1.3], showgrid=False, visible=False),
-        yaxis=dict(gridcolor="#1e2535"),
-        height=200, margin=dict(l=10, r=60, t=10, b=10)
-    )
-    return fig
 
 
 # ─────────────────────────────────────────────
@@ -776,17 +744,14 @@ if run_btn and user_input.strip():
             """, unsafe_allow_html=True)
 
         with b_right:
-            st.markdown('<div class="section-header">Bias Breakdown</div>', unsafe_allow_html=True)
-            st.plotly_chart(render_bias_chart(result["bias_score"]),
-                            use_container_width=True, config={"displayModeBar": False})
-
-            overall_bias = result["bias_score"]
-            bias_label = "Low" if overall_bias < 0.35 else ("Moderate" if overall_bias < 0.65 else "High")
-            bias_color = "#10b981" if overall_bias < 0.35 else ("#f59e0b" if overall_bias < 0.65 else "#ef4444")
+            st.markdown('<div class="section-header">Source Credibility</div>', unsafe_allow_html=True)
+            confidence = result.get("confidence", 0.0)
+            conf_label = "High" if confidence >= 0.65 else ("Moderate" if confidence >= 0.35 else "Low")
+            conf_color = "#10b981" if confidence >= 0.65 else ("#f59e0b" if confidence >= 0.35 else "#ef4444")
             st.markdown(f"""
             <div class="metric-box" style="margin-top:0.5rem">
-                <div class="metric-value" style="color:{bias_color};">{overall_bias:.0%}</div>
-                <div class="metric-label">Overall Bias Score — {bias_label}</div>
+                <div class="metric-value" style="color:{conf_color};">{confidence:.0%}</div>
+                <div class="metric-label">Verdict Confidence — {conf_label}</div>
             </div>
             """, unsafe_allow_html=True)
 

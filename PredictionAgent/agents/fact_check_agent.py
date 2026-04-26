@@ -134,6 +134,5 @@ def fact_check_claim(
             confidence_score=0,
             evidence_links=[],
             reasoning="Pipeline error — no output produced.",
-            bias_score=0.5,
         )
     return fc_output

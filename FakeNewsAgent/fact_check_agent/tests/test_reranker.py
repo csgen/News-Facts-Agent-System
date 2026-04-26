@@ -315,8 +315,25 @@ def _ensure_memory_agent_env():
     os.environ.setdefault("OPENAI_API_KEY",   "unused")
 
 
+def _stub_missing_modules():
+    """Stub heavy/unavailable deps so src.memory.agent can be imported in CI."""
+    import sys
+    from unittest.mock import MagicMock as _M
+    for mod in [
+        "google.genai", "rapidfuzz", "rapidfuzz.fuzz", "rapidfuzz.process",
+        "neo4j", "chromadb",
+    ]:
+        sys.modules.setdefault(mod, _M())
+    # google.genai must also be reachable as google_mod.genai
+    google_mod = sys.modules.get("google", _M())
+    if not hasattr(google_mod, "genai"):
+        google_mod.genai = sys.modules["google.genai"]
+        sys.modules["google"] = google_mod
+
+
 def _make_verdict(verdict_id="v_new", claim_id="clm_001", label="refuted"):
     _ensure_memory_agent_env()
+    _stub_missing_modules()
     import importlib
     Verdict = importlib.import_module("src.models.verdict").Verdict
     return Verdict(
@@ -325,7 +342,6 @@ def _make_verdict(verdict_id="v_new", claim_id="clm_001", label="refuted"):
         label=label,
         confidence=0.9,
         evidence_summary="evidence",
-        bias_score=0.2,
         image_mismatch=False,
         verified_at=datetime.now(timezone.utc),
     )
@@ -333,6 +349,7 @@ def _make_verdict(verdict_id="v_new", claim_id="clm_001", label="refuted"):
 
 def _get_add_verdict_fn():
     _ensure_memory_agent_env()
+    _stub_missing_modules()
     import importlib
     return importlib.import_module("src.memory.agent").MemoryAgent.add_verdict
 

@@ -206,7 +206,6 @@ class GraphStore:
         label: str,
         confidence: float,
         evidence_summary: str,
-        bias_score: float,
         image_mismatch: bool,
         verified_at: datetime,
     ) -> None:
@@ -220,7 +219,6 @@ class GraphStore:
                     label: $label,
                     confidence: $confidence,
                     evidence_summary: $evidence_summary,
-                    bias_score: $bias_score,
                     image_mismatch: $image_mismatch,
                     verified_at: datetime($verified_at),
                     status: 'active'
@@ -233,7 +231,6 @@ class GraphStore:
                 label=label,
                 confidence=confidence,
                 evidence_summary=evidence_summary,
-                bias_score=bias_score,
                 image_mismatch=image_mismatch,
                 verified_at=verified_at.isoformat(),
             )

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Optional
 
 import fact_check_agent.src.llm_factory as _llm_factory
@@ -35,10 +36,34 @@ logger = logging.getLogger(__name__)
 # ── Step 1: question generation ───────────────────────────────────────────────
 
 def _parse_json(raw: str) -> dict:
+    """Robustly parse a JSON object from an LLM response.
+
+    Handles three common failure modes:
+      1. Markdown fences  — ```json { ... } ```
+      2. JSON in prose    — "Here is my answer: { ... }"
+      3. Trailing text    — "{ ... } Hope that helps!"
+    """
     raw = raw.strip()
+
+    # Strip markdown fences
     if raw.startswith("```"):
         raw = raw.split("```")[1].lstrip("json").strip()
-    return json.loads(raw)
+        # Strip closing fence if present
+        if "```" in raw:
+            raw = raw[:raw.index("```")].strip()
+
+    # Try direct parse first
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Extract first {...} block from prose using regex
+    match = re.search(r"\{[\s\S]*\}", raw)
+    if match:
+        return json.loads(match.group(0))
+
+    raise ValueError(f"No valid JSON object found in response: {raw[:200]!r}")
 
 
 def _generate_questions(claim_text: str, model: str, client) -> dict[str, list[str]]:
@@ -94,22 +119,26 @@ def _check_coverage(
         questions_block=questions_block,
         context_block=context_block,
     )
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        result   = _parse_json(resp.choices[0].message.content or "")
-        coverage = result.get("coverage", [])
-        answered = sum(1 for c in coverage if c.get("answered"))
-        logger.info("context_claim_agent: %d/%d questions answered by context",
-                    answered, len(questions))
-        return coverage
-    except Exception as exc:
-        logger.warning("coverage check failed: %s", exc)
-        return [{"question": q, "answered": False, "evidence": None} for q in questions]
+    last_exc: Exception = RuntimeError("no attempts made")
+    for attempt in range(3):
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            result   = _parse_json(resp.choices[0].message.content or "")
+            coverage = result.get("coverage", [])
+            answered = sum(1 for c in coverage if c.get("answered"))
+            logger.info("context_claim_agent: %d/%d questions answered by context",
+                        answered, len(questions))
+            return coverage
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("coverage check attempt %d/3 failed: %s", attempt + 1, exc)
+    logger.error("coverage check failed after 3 attempts: %s", last_exc)
+    return [{"question": q, "answered": False, "evidence": None} for q in questions]
 
 
 # ── Step 3+4: search + summarise ─────────────────────────────────────────────
@@ -131,24 +160,28 @@ def _summarise_search(
         question=question,
         search_results=search_text[:40000],
     )
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        result = _parse_json(resp.choices[0].message.content or "")
-        if not result.get("summary"):
-            return None
-        return {
-            "summary":     result["summary"],
-            "source_name": result.get("source_name") or None,
-            "timestamp":   result.get("timestamp") or None,
-        }
-    except Exception as exc:
-        logger.warning("evidence extraction failed: %s", exc)
-        return None
+    last_exc: Exception = RuntimeError("no attempts made")
+    for attempt in range(3):
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            result = _parse_json(resp.choices[0].message.content or "")
+            if not result.get("summary"):
+                return None
+            return {
+                "summary":     result["summary"],
+                "source_name": result.get("source_name") or None,
+                "timestamp":   result.get("timestamp") or None,
+            }
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("evidence extraction attempt %d/3 failed: %s", attempt + 1, exc)
+    logger.error("evidence extraction failed after 3 attempts: %s", last_exc)
+    return None
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────

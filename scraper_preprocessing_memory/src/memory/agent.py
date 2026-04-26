@@ -232,7 +232,6 @@ class MemoryAgent:
             claim_id=verdict.claim_id,
             label=verdict.label,
             confidence=verdict.confidence,
-            bias_score=verdict.bias_score,
             image_mismatch=verdict.image_mismatch,
             verified_at=verdict.verified_at.isoformat(),
         )
@@ -243,7 +242,6 @@ class MemoryAgent:
             label=verdict.label,
             confidence=verdict.confidence,
             evidence_summary=verdict.evidence_summary,
-            bias_score=verdict.bias_score,
             image_mismatch=verdict.image_mismatch,
             verified_at=verdict.verified_at,
         )
@@ -298,6 +296,10 @@ class MemoryAgent:
         self._graph.resolve_prediction(prediction_id, outcome)
 
     # ── Query Methods ───────────────────────────────────────────────────
+
+    def update_claim_status(self, claim_id: str, status: str) -> None:
+        """Update the status of an existing claim (e.g. 'pending' → 'verified')."""
+        self._vector.update_claim_status(claim_id, status)
 
     def search_similar_claims(
         self, text: str, top_k: int = 5
@@ -502,12 +504,11 @@ class MemoryAgent:
         topic_text: str,
         source_id: str,
         credibility: float,
-        bias: float,
         verdict_label: str,
         verdict_id: str,
         created_at: str,
     ) -> None:
-        """Append one (source, topic, credibility, bias) observation."""
+        """Append one (source, topic, credibility) observation."""
         embedding = self._embeddings.embed(topic_text)
         self._vector.upsert_source_credibility_point(
             point_id=point_id,
@@ -515,7 +516,6 @@ class MemoryAgent:
             document=topic_text,
             source_id=source_id,
             credibility=credibility,
-            bias=bias,
             verdict_label=verdict_label,
             verdict_id=verdict_id,
             created_at=created_at,
