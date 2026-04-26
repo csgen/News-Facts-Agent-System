@@ -1,12 +1,17 @@
+"""Top-level FakeNewsAgent conftest.
+
+In the integrated monorepo (news_facts_system), the memory module lives at the
+sibling `scraper_preprocessing_memory/` subfolder, not at `./memory_agent/`.
+The top-level `pytest.ini` already adds the right paths to PYTHONPATH; this
+file only sets default env vars so tests that touch `src.config.Settings`
+don't fail at import time on missing required fields.
+"""
 import os
-import sys
-from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent
-_MEMORY_AGENT = str(_ROOT / "memory_agent")
-if _MEMORY_AGENT not in sys.path:
-    sys.path.insert(0, _MEMORY_AGENT)
-
-os.environ.setdefault("NEO4J_URI",      "bolt://localhost:7687")
-os.environ.setdefault("NEO4J_PASSWORD", "fakenews123")
-os.environ.setdefault("OPENAI_API_KEY", "unused")
+# Required by `src.config.Settings` (raises if missing). Use safe placeholders;
+# any test that actually hits the network is decorated with @pytest.mark.skipif
+# or @pytest.mark.integration.
+os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
+os.environ.setdefault("NEO4J_USER", "neo4j")
+os.environ.setdefault("NEO4J_PASSWORD", "test_unused")
+os.environ.setdefault("OPENAI_API_KEY", "sk-test-unused")
