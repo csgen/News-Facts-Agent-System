@@ -1,0 +1,96 @@
+# Scheduled scraper: runs the scrape → preprocess → ingest pipeline
+# on a cron, and on manual trigger from the Actions tab.
+#
+# Writes to whichever DB your secrets point at (Aura + Chroma Cloud by default).
+# Idempotent — the pipeline deduplicates by content hash, so re-running a
+# missed window is harmless.
+
+name: Scheduled Scrape
+
+on:
+  # Every 6 hours at minute 0 (UTC). Adjust to taste:
+  #   '0 */3 * * *'   → every 3h
+  #   '0 6,18 * * *'  → twice a day at 06:00 and 18:00 UTC
+  schedule:
+    - cron: '0 */6 * * *'
+
+  # Manual trigger from the Actions tab (handy for testing).
+  workflow_dispatch:
+    inputs:
+      max_per_source:
+        description: 'Max articles per source (default 20)'
+        required: false
+        default: '20'
+
+# Don't queue overlapping runs — if a run is still going when cron fires,
+# skip the new one rather than pile on duplicates.
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    name: Scrape + preprocess + ingest
+    runs-on: ubuntu-latest
+    # Hard cap so a hung run doesn't burn an hour of compute.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12 with pip cache
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install system build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential gcc
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download spaCy model
+        run: python -m spacy download en_core_web_sm
+
+      - name: Run scraper pipeline
+        working-directory: scraper_preprocessing_memory
+        env:
+          # ── DB (cloud) ─────────────────────────────────────
+          NEO4J_URI:           ${{ secrets.NEO4J_URI }}
+          NEO4J_USER:          ${{ secrets.NEO4J_USER }}
+          NEO4J_PASSWORD:      ${{ secrets.NEO4J_PASSWORD }}
+          CHROMA_API_KEY:      ${{ secrets.CHROMA_API_KEY }}
+          CHROMA_TENANT:       ${{ secrets.CHROMA_TENANT }}
+          CHROMA_DATABASE:     ${{ secrets.CHROMA_DATABASE }}
+
+          # ── LLM / embeddings ──────────────────────────────
+          OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY:      ${{ secrets.GOOGLE_API_KEY }}
+
+          # ── Live data sources ─────────────────────────────
+          TAVILY_API_KEY:      ${{ secrets.TAVILY_API_KEY }}
+          # Optional — only set these as repo secrets if you use the source.
+          TELEGRAM_SCRAPER_API_URL: ${{ secrets.TELEGRAM_SCRAPER_API_URL }}
+          TELEGRAM_SCRAPER_API_KEY: ${{ secrets.TELEGRAM_SCRAPER_API_KEY }}
+          ENSEMBLEDATA_API_TOKEN:   ${{ secrets.ENSEMBLEDATA_API_TOKEN }}
+
+          # ── Observability (optional — leave secrets blank to disable) ──
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_HOST:       ${{ secrets.LANGFUSE_HOST }}
+
+          # ── Model defaults — pinned so a model rename upstream doesn't surprise us ──
+          EMBEDDING_MODEL: gemini-embedding-001
+          EMBEDDING_DIM:   1536
+          LLM_MODEL:       gpt-4o-mini
+          VISION_MODEL:    gpt-4o
+        run: |
+          echo "Starting scheduled scrape at $(date -u)"
+          python -m src.pipeline
+          echo "Finished scheduled scrape at $(date -u)"
