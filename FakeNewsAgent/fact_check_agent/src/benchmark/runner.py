@@ -333,9 +333,9 @@ def _run_debate(
     Returns: (verdict_label, confidence_0_100, reasoning)
     Falls back to neutral verdict on any failure.
     """
+    from fact_check_agent.src.agents.context_claim_agent import _parse_json
     from fact_check_agent.src.graph.nodes import _format_neutral_scores_block
     from fact_check_agent.src.prompts import JUDGE_PROMPT, SKEPTIC_PROMPT, SUPPORTER_PROMPT
-    from fact_check_agent.src.agents.context_claim_agent import _parse_json
 
     neutral_block = _format_neutral_scores_block(context_claims, neutral_degrees)
 
@@ -415,11 +415,11 @@ def _run_factify2_verdict_pipeline(
         run_both=True:  (nodebate_verdict, nodebate_conf, nodebate_reasoning,
                          debate_verdict,   debate_conf,   debate_reasoning)
     """
+    import fact_check_agent.src.llm_factory as _llm_factory
     from fact_check_agent.src.agents import context_claim_agent
+    from fact_check_agent.src.agents.context_claim_agent import _parse_json
     from fact_check_agent.src.graph.nodes import _format_numbered_context_claims
     from fact_check_agent.src.prompts import VERDICT_SYNTHESIS_PROMPT
-    from fact_check_agent.src.agents.context_claim_agent import _parse_json
-    import fact_check_agent.src.llm_factory as _llm_factory
 
     # Step 1–3: generate questions + extract answers from document
     claims = context_claim_agent.run(
