@@ -65,7 +65,7 @@ jobs:
       - name: Download spaCy model
         run: python -m spacy download en_core_web_sm
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         env:
           # Placeholder values so pydantic-Settings doesn't raise on import.
           # Tests that actually need real keys are decorated with skipif.
@@ -81,4 +81,19 @@ jobs:
           # `-m "not integration"` skips tests marked @pytest.mark.integration.
           # Tests marked @pytest.mark.skipif(not OPENAI_API_KEY) etc. auto-skip
           # because the env vars above are placeholders / blank.
-          pytest -m "not integration" -v --tb=short
+          # --cov scoped to our three subfolders so we don't measure coverage
+          # of stdlib / third-party deps. Term report shows %; XML upload-able.
+          pytest -m "not integration" -v --tb=short \
+            --cov=scraper_preprocessing_memory/src \
+            --cov=FakeNewsAgent/fact_check_agent/src \
+            --cov=PredictionAgent/agents \
+            --cov-report=term \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report (artifact, 14-day retention)
+        if: always()    # upload even if tests failed, so we can inspect why
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14

@@ -283,13 +283,50 @@ JINA_API_KEY=                              # leave blank for free tier; set for 
 
 Two workflows live under `.github/workflows/`:
 
-### `ci.yml` — Lint + unit tests
+### `ci.yml` — Lint + unit tests + coverage
 
 Runs on every push and PR to `main`, plus on manual trigger:
 - `lint` job: `ruff check .` (ruleset configured in `pyproject.toml`)
-- `test` job: installs deps + spaCy model, runs `pytest -m "not integration"` (skips live-API tests)
+- `test` job: installs deps + spaCy model, runs `pytest -m "not integration" --cov=...` (skips live-API tests, measures line coverage)
 
 Tests that hit OpenAI / Neo4j / Tavily either carry `@pytest.mark.skipif(not OPENAI_API_KEY, …)` (auto-skip in CI) or should be tagged `@pytest.mark.integration` (excluded from the default run).
+
+#### Test coverage
+
+Coverage runs as part of every CI test job and prints a per-file line-coverage table at the end of the test output:
+
+```
+---------- coverage: platform linux, python 3.12.x ----------
+Name                                                          Stmts   Miss  Cover
+---------------------------------------------------------------------------------
+scraper_preprocessing_memory/src/memory/agent.py                 142     38   73%
+scraper_preprocessing_memory/src/memory/vector_store.py           58     12   79%
+FakeNewsAgent/fact_check_agent/src/graph/nodes.py                206     91   56%
+PredictionAgent/agents/entity_tracker.py                          81     22   73%
+...
+```
+
+The XML report is uploaded as a workflow artifact (`coverage-xml`, 14-day retention) — download it from the Actions run page and open in any coverage viewer (or feed to codecov / coveralls if you ever set those up).
+
+To run coverage locally inside your container:
+
+```bash
+docker compose -f docker/docker-compose.yml run --rm shell
+pytest -m "not integration" \
+  --cov=scraper_preprocessing_memory/src \
+  --cov=FakeNewsAgent/fact_check_agent/src \
+  --cov=PredictionAgent/agents \
+  --cov-report=term-missing
+```
+
+`--cov-report=term-missing` prints uncovered line numbers next to each file — handy for spotting which branches need a test.
+
+For an HTML report you can browse:
+
+```bash
+pytest -m "not integration" --cov=PredictionAgent/agents --cov-report=html
+# then open htmlcov/index.html in a browser
+```
 
 ### `scrape.yml` — Scheduled scraper
 
