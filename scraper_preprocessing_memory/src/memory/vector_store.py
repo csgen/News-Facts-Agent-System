@@ -27,8 +27,16 @@ class VectorStore:
             # Remote ChromaDB reachable over HTTP (e.g. local Docker container)
             self._client = chromadb.HttpClient(host=host, port=int(port))
         else:
-            # Embedded ChromaDB (in-process, for development/testing)
-            self._client = chromadb.Client()
+            # Persistent local ChromaDB — survives process restarts
+            import os
+            _chroma_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "..", "..", "chroma_data"
+            )
+            _chroma_path = os.path.normpath(_chroma_path)
+            os.makedirs(_chroma_path, exist_ok=True)
+            logger.info("ChromaDB using persistent local store at: %s", _chroma_path)
+            self._client = chromadb.PersistentClient(path=_chroma_path)
 
         self._claims = self._client.get_or_create_collection("claims")
         self._articles = self._client.get_or_create_collection("articles")
@@ -136,6 +144,63 @@ class VectorStore:
 
     def get_verdict_by_claim(self, claim_id: str) -> dict:
         return self._verdicts.get(where={"claim_id": claim_id})
+
+    def update_verdict_metadata(self, verdict_id: str, label: str, confidence: float) -> None:
+        """Patch label + confidence on an existing verdict in ChromaDB (human feedback)."""
+        existing = self._verdicts.get(ids=[verdict_id], include=["metadatas", "embeddings", "documents"])
+        if not existing["ids"]:
+            return
+        meta = dict(existing["metadatas"][0])
+        meta["label"]          = label
+        meta["confidence"]     = confidence
+        meta["human_feedback"] = True
+        self._verdicts.upsert(
+            ids=[verdict_id],
+            embeddings=[existing["embeddings"][0]],
+            documents=[existing["documents"][0]],
+            metadatas=[meta],
+        )
+
+    def find_human_verdict_by_embedding(self, embedding: list[float], threshold: float = 0.70) -> dict | None:
+        """Search verdicts for a human-corrected entry similar to the given embedding.
+
+        Searches top-5 nearest verdicts, then checks metadata for human_feedback flag.
+        Avoids ChromaDB boolean `where` filters (unreliable across versions).
+        Returns the best match dict (with label, confidence, claim_id) or None.
+        """
+        try:
+            results = self._verdicts.query(
+                query_embeddings=[embedding],
+                n_results=5,
+                include=["metadatas", "distances"],
+            )
+            if not results["ids"] or not results["ids"][0]:
+                return None
+
+            for i, (rid, meta, dist) in enumerate(zip(
+                results["ids"][0],
+                results["metadatas"][0],
+                results["distances"][0],
+            )):
+                # Check human_feedback — stored as bool True or string "true"
+                hf = meta.get("human_feedback")
+                is_human = hf is True or str(hf).lower() == "true"
+                if not is_human:
+                    continue
+
+                # ChromaDB default uses L2 (squared Euclidean): 0=identical
+                # Convert to 0-1 similarity: closer to 1 = more similar
+                similarity = 1.0 / (1.0 + dist)
+                if similarity >= threshold:
+                    result = dict(meta)
+                    result["verdict_id"] = rid
+                    result["_similarity"] = round(similarity, 3)
+                    return result
+
+        except Exception as e:
+            import logging as _log
+            _log.getLogger(__name__).warning("find_human_verdict_by_embedding failed: %s", e)
+        return None
 
     # ── Image Captions ──────────────────────────────────────────────────
 

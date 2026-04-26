@@ -95,6 +95,49 @@ def _siglip_check(claim_text: str, image_url: str) -> dict:
         return {"conflict": False, "explanation": None, "siglip_score": None}
 
 
+def _openai_vision_check(claim_text: str, image_url: str, api_key: str, model: str) -> dict:
+    """Send image URL + claim to GPT-4o / GPT-4o-mini vision API.
+
+    Uses the model's native vision capability — no base64 encoding needed.
+    Falls back to caption-text LLM check if the call fails.
+    """
+    # Use a vision-capable model — upgrade mini to full vision if needed
+    vision_model = model if model in ("gpt-4o", "gpt-4o-mini") else "gpt-4o-mini"
+    prompt = (
+        "You are a fact-checking assistant verifying whether a news article image "
+        "is consistent with the article's claim.\n\n"
+        f"Claim: {claim_text}\n\n"
+        "Look at the image and answer:\n"
+        "1. What does the image show? (1-2 sentences)\n"
+        "2. Does the image support, contradict, or is it unrelated to the claim?\n\n"
+        "Respond in JSON: "
+        '{"conflict": true/false, "explanation": "what the image shows and whether it matches the claim"}'
+    )
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=vision_model,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_url, "detail": "low"}},
+                    {"type": "text",      "text": prompt},
+                ],
+            }],
+            response_format={"type": "json_object"},
+            temperature=0,
+            max_tokens=300,
+        )
+        raw = response.choices[0].message.content.strip()
+        result = json.loads(raw)
+        logger.debug("OpenAI vision cross-modal: conflict=%s explanation=%s",
+                     result.get("conflict"), result.get("explanation"))
+        return result
+    except Exception as e:
+        logger.warning("OpenAI vision check failed (%s) — skipping cross-modal", e)
+        return {"conflict": False, "explanation": None}
+
+
 def check_cross_modal(
     claim_text: str,
     image_caption: Optional[str],
@@ -103,6 +146,12 @@ def check_cross_modal(
     image_url: Optional[str] = None,
 ) -> dict:
     """Check for logical conflicts between claim text and image/caption.
+
+    Priority order:
+      1. SigLIP (local, fast) — if use_siglip=True and image_url provided
+      2. Gemma 4 vision via Ollama — if llm_provider=ollama and image_url provided
+      3. GPT-4o vision — if llm_provider=openai and image_url provided  ← NEW
+      4. LLM caption text check (fallback when no image_url)
 
     Returns:
         {"flag": bool, "explanation": str | None, "siglip_score": float | None}
@@ -119,8 +168,10 @@ def check_cross_modal(
     elif image_url and settings.llm_provider == "ollama":
         result = _vision_check(claim_text, image_url)
         if result is None:
-            # Image fetch failed (e.g. 403) — fall back to caption text
             result = _llm_check(claim_text, image_caption or "", api_key, model)
+    elif image_url and settings.llm_provider == "openai":
+        # Use GPT-4o vision to actually look at the image
+        result = _openai_vision_check(claim_text, image_url, api_key, model)
     else:
         result = _llm_check(claim_text, image_caption or "", api_key, model)
 

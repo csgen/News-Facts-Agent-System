@@ -398,10 +398,28 @@ class MemoryAgent:
         correct_confidence: float,
         feedback_note: str = "",
     ) -> None:
-        """Override a verdict with human-corrected values (human-in-the-loop)."""
+        """Override a verdict with human-corrected values (human-in-the-loop).
+
+        Updates both Neo4j (graph) and ChromaDB (vector) so the pipeline cache
+        returns the corrected verdict on the next fact-check of the same claim.
+        """
         self._graph.update_verdict_with_feedback(
             verdict_id, correct_label, correct_confidence, feedback_note
         )
+        # Also patch ChromaDB so cache_check picks up the correction next run
+        try:
+            self._vector.update_verdict_metadata(verdict_id, correct_label, correct_confidence)
+        except Exception as e:
+            logger.warning("ChromaDB verdict patch skipped: %s", e)
+
+    def find_human_verdict_for_claim(self, claim_text: str, threshold: float = 0.70) -> dict | None:
+        """Return a human-corrected verdict for a semantically similar claim, or None."""
+        try:
+            embedding = self._embeddings.embed(claim_text)
+            return self._vector.find_human_verdict_by_embedding(embedding, threshold=threshold)
+        except Exception as e:
+            logger.warning("Human verdict lookup failed: %s", e)
+            return None
 
     # ── Reflection Agent read/write (Task 2) ───────────────────────────
 

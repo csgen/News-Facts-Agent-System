@@ -211,18 +211,25 @@ class GraphStore:
         with self._driver.session() as session:
             session.run(
                 """
-                MATCH (c:Claim {claim_id: $claim_id})
-                CREATE (v:Verdict {
-                    verdict_id: $verdict_id,
-                    claim_id: $claim_id,
-                    label: $label,
-                    confidence: $confidence,
-                    evidence_summary: $evidence_summary,
-                    bias_score: $bias_score,
-                    image_mismatch: $image_mismatch,
-                    verified_at: datetime($verified_at)
-                })
-                CREATE (c)-[:VERIFIED_AS]->(v)
+                MERGE (c:Claim {claim_id: $claim_id})
+                ON CREATE SET
+                    c.claim_text   = '',
+                    c.extracted_at = datetime(),
+                    c.status       = 'pending'
+                MERGE (v:Verdict {verdict_id: $verdict_id})
+                ON CREATE SET
+                    v.claim_id         = $claim_id,
+                    v.label            = $label,
+                    v.confidence       = $confidence,
+                    v.evidence_summary = $evidence_summary,
+                    v.bias_score       = $bias_score,
+                    v.image_mismatch   = $image_mismatch,
+                    v.verified_at      = datetime($verified_at)
+                ON MATCH SET
+                    v.label            = $label,
+                    v.confidence       = $confidence,
+                    v.evidence_summary = $evidence_summary
+                MERGE (c)-[:VERIFIED_AS]->(v)
                 SET c.status = 'verified'
                 """,
                 verdict_id=verdict_id,
