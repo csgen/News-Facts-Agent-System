@@ -1,10 +1,9 @@
 """Tests for the freshness tool — no OpenAI API key required."""
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from fact_check_agent.src.tools.freshness_tool import check_freshness
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

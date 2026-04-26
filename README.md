@@ -276,3 +276,63 @@ JINA_API_KEY=                              # leave blank for free tier; set for 
   then `streamlit run frontend/app.py`.
 - **`scraper` writes nothing** — first run `init-db`, and confirm the `.env` API keys are non-empty.
 - **Disabling Langfuse** — the two flags `LANGFUSE_ENABLED` and `LANGFUSE_TRACING_ENABLED` gate only `FakeNewsAgent`'s Langfuse code; `scraper_preprocessing_memory` ignores them. To fully silence Langfuse for both modules, leave `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` blank in `.env`. With empty keys the SDK silently no-ops on every `@observe` and every `langfuse.openai` call.
+
+---
+
+## CI/CD (GitHub Actions)
+
+Two workflows live under `.github/workflows/`:
+
+### `ci.yml` — Lint + unit tests
+
+Runs on every push and PR to `main`, plus on manual trigger:
+- `lint` job: `ruff check .` (ruleset configured in `pyproject.toml`)
+- `test` job: installs deps + spaCy model, runs `pytest -m "not integration"` (skips live-API tests)
+
+Tests that hit OpenAI / Neo4j / Tavily either carry `@pytest.mark.skipif(not OPENAI_API_KEY, …)` (auto-skip in CI) or should be tagged `@pytest.mark.integration` (excluded from the default run).
+
+### `scrape.yml` — Scheduled scraper
+
+Runs the scraper pipeline against cloud DBs every 6 hours (cron `0 */6 * * *`), and on manual trigger. Each run:
+1. Spins up an Ubuntu runner
+2. Installs deps + spaCy
+3. Runs `python -m src.pipeline` from `scraper_preprocessing_memory/`
+4. Articles + claims + captions land in your Aura + ChromaDB Cloud
+5. Runner exits — no state kept between runs
+
+The pipeline deduplicates by content hash, so missed runs / retries are safe.
+
+### Required GitHub Secrets
+
+In repo: **Settings → Secrets and variables → Actions → New repository secret**, add:
+
+| Secret | Required for | Notes |
+|---|---|---|
+| `OPENAI_API_KEY` | scrape | Claim isolation, entity extraction, GPT-4o vision |
+| `GOOGLE_API_KEY` | scrape | Gemini embeddings |
+| `TAVILY_API_KEY` | scrape | Live news search |
+| `NEO4J_URI` | scrape | e.g. `neo4j+s://xxxxxxxx.databases.neo4j.io` |
+| `NEO4J_USER` | scrape | Usually `neo4j` |
+| `NEO4J_PASSWORD` | scrape | Aura password |
+| `CHROMA_API_KEY` | scrape | ChromaDB Cloud key |
+| `CHROMA_TENANT` | scrape | ChromaDB Cloud tenant ID |
+| `CHROMA_DATABASE` | scrape | ChromaDB Cloud database name |
+| `TELEGRAM_SCRAPER_API_URL` | scrape (optional) | Only if using Telegram fetcher |
+| `TELEGRAM_SCRAPER_API_KEY` | scrape (optional) | |
+| `ENSEMBLEDATA_API_TOKEN` | scrape (optional) | Only if using Reddit/EnsembleData fetcher |
+| `LANGFUSE_PUBLIC_KEY` | scrape (optional) | Leave unset to disable Langfuse |
+| `LANGFUSE_SECRET_KEY` | scrape (optional) | |
+| `LANGFUSE_HOST` | scrape (optional) | e.g. `https://cloud.langfuse.com` |
+
+CI (`ci.yml`) needs **no secrets** — it runs against placeholder env vars.
+
+### Manual / one-off triggers
+
+From the GitHub UI: **Actions** tab → pick a workflow → **Run workflow**. Useful for:
+- Re-running the scraper out-of-cycle after pushing fetcher changes
+- Smoke-testing a workflow before relying on the cron
+
+### Cost/Frequency guardrails
+
+- To throttle: edit the cron in `.github/workflows/scrape.yml`, or lower `max_per_source` in `src/pipeline.py`'s `ScraperAgent.scrape(...)` call.
+- The 30-minute `timeout-minutes` cap stops a hung run from racking up runner-minutes.

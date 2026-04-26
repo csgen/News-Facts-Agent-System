@@ -10,16 +10,10 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 import fact_check_agent.src.llm_factory as _llm_factory
-
 from fact_check_agent.src.agents.reflection_agent import (
     query_source_credibility,
     update_source_credibility,
 )
-from fact_check_agent.src.tools.cross_modal_tool import check_cross_modal
-from fact_check_agent.src.tools.freshness_tool import check_freshness
-from fact_check_agent.src.tools.live_search_tool import format_search_context, search_live
-from fact_check_agent.src.tools.rag_tool import format_rag_context, retrieve_similar_claims
-from fact_check_agent.src.tools.reranker import rerank_candidates
 from fact_check_agent.src.models.schemas import (
     FactCheckOutput,
     MemoryQueryResponse,
@@ -33,6 +27,11 @@ from fact_check_agent.src.prompts import (
     IS_RETRIEVAL_NEEDED_PROMPT,
     VERDICT_SYNTHESIS_PROMPT,
 )
+from fact_check_agent.src.tools.cross_modal_tool import check_cross_modal
+from fact_check_agent.src.tools.freshness_tool import check_freshness
+from fact_check_agent.src.tools.live_search_tool import format_search_context, search_live
+from fact_check_agent.src.tools.rag_tool import format_rag_context, retrieve_similar_claims
+from fact_check_agent.src.tools.reranker import rerank_candidates
 
 if TYPE_CHECKING:
     from src.memory.agent import MemoryAgent  # memory_agent — type hint only
@@ -413,7 +412,6 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
     Gated by settings.use_debate + debate_confidence_threshold.
     Two advocate agents argue for/against, an arbiter synthesises a final verdict.
     """
-    from fact_check_agent.src.id_utils import make_id
 
     inp            = state["input"]
     output         = state.get("output")

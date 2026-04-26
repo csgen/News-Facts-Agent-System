@@ -2,7 +2,6 @@
 
 import httpx
 import respx
-
 from src.scraper.fetchers.newsapi import TavilyFetcher
 from src.scraper.fetchers.reddit import RedditFetcher
 

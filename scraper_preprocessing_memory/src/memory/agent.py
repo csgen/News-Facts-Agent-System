@@ -21,7 +21,6 @@ from src.memory.embeddings import EmbeddingHelper
 from src.memory.entity_merger import EntityMerger
 from src.memory.graph_store import GraphStore
 from src.memory.vector_store import VectorStore
-from src.models.caption import ImageCaption
 from src.models.credibility import CredibilitySnapshot, Prediction
 from src.models.pipeline import PreprocessingOutput
 from src.models.verdict import Verdict
@@ -202,7 +201,21 @@ class MemoryAgent:
     # ── Teammate Write Methods ──────────────────────────────────────────
 
     def add_verdict(self, verdict: Verdict) -> None:
-        """Write a fact-check verdict to both databases."""
+        """Write a fact-check verdict to both databases.
+
+        If an active verdict already exists for the same claim, mark it as
+        superseded before writing the new one. The full verdict history is
+        preserved in storage; only the latest active verdict is returned by
+        get_verdict_by_claim.
+        """
+        # ── Supersede prior active verdict, if any ─────────────────────
+        existing = self._vector.get_verdict_by_claim(verdict.claim_id)
+        if existing.get("ids"):
+            old_id = existing["ids"][0]
+            if old_id != verdict.verdict_id:  # idempotency guard
+                self._vector.supersede_verdict(old_id, verdict.verdict_id)
+                self._graph.supersede_verdict(old_id, verdict.verdict_id)
+
         # Get the claim text for combined embedding
         claim_results = self._vector.get_claims_by_ids([verdict.claim_id])
         claim_text = ""

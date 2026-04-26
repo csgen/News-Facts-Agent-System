@@ -222,7 +222,8 @@ class GraphStore:
                     evidence_summary: $evidence_summary,
                     bias_score: $bias_score,
                     image_mismatch: $image_mismatch,
-                    verified_at: datetime($verified_at)
+                    verified_at: datetime($verified_at),
+                    status: 'active'
                 })
                 CREATE (c)-[:VERIFIED_AS]->(v)
                 SET c.status = 'verified'
@@ -235,6 +236,24 @@ class GraphStore:
                 bias_score=bias_score,
                 image_mismatch=image_mismatch,
                 verified_at=verified_at.isoformat(),
+            )
+
+    def supersede_verdict(self, old_verdict_id: str, new_verdict_id: str) -> None:
+        """Mark an old VERDICT node as superseded by a newer one.
+
+        Sets old.status = 'superseded' and creates a (old)-[:SUPERSEDED_BY]->(new) edge.
+        Idempotent — repeated calls leave the same end state thanks to MERGE on the edge.
+        """
+        with self._driver.session() as session:
+            session.run(
+                """
+                MATCH (old:Verdict {verdict_id: $old_id})
+                MATCH (new:Verdict {verdict_id: $new_id})
+                SET old.status = 'superseded'
+                MERGE (old)-[:SUPERSEDED_BY]->(new)
+                """,
+                old_id=old_verdict_id,
+                new_id=new_verdict_id,
             )
 
     # ── Write: Credibility Snapshots (called by Entity Tracker) ─────────
@@ -456,15 +475,20 @@ class GraphStore:
         entity_id: str,
         since: Optional[datetime] = None,
     ) -> list[dict]:
-        """Get claims mentioning an entity, optionally filtered by time."""
+        """Get claims mentioning an entity, optionally filtered by time.
+
+        Superseded verdicts are filtered out. Legacy verdicts (without a
+        status property) are treated as active.
+        """
         query = """
             MATCH (e:Entity {entity_id: $entity_id})<-[m:MENTIONS]-(c:Claim)
             -[:VERIFIED_AS]->(v:Verdict)
+            WHERE (v.status IS NULL OR v.status = 'active')
         """
         params: dict[str, Any] = {"entity_id": entity_id}
 
         if since:
-            query += " WHERE v.verified_at > datetime($since)"
+            query += " AND v.verified_at > datetime($since)"
             params["since"] = since.isoformat()
 
         query += """
@@ -666,7 +690,11 @@ class GraphStore:
             return [dict(record) for record in result]
 
     def get_graph_claims_for_entities(self, entity_ids: list[str]) -> list[dict]:
-        """Return verified claims mentioning a list of entities (for GraphRAG)."""
+        """Return verified claims mentioning a list of entities (for GraphRAG).
+
+        Superseded verdicts are filtered out. Legacy verdicts (without a
+        status property) are treated as active.
+        """
         if not entity_ids:
             return []
         with self._driver.session() as session:
@@ -674,6 +702,7 @@ class GraphStore:
                 """
                 MATCH (e:Entity)<-[m:MENTIONS]-(c:Claim)-[:VERIFIED_AS]->(v:Verdict)
                 WHERE e.entity_id IN $entity_ids
+                  AND (v.status IS NULL OR v.status = 'active')
                 RETURN c.claim_id AS claim_id,
                        c.claim_text AS claim_text,
                        v.label AS verdict_label,

@@ -31,10 +31,8 @@ import json
 import logging
 import os
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -191,7 +189,7 @@ def extract_topics(claims: list[str], model: str, workers: int) -> dict[str, lis
 def normalize_vocabulary(raw_tags: set[str], model: str) -> dict[str, str]:
     """Ask LLM to merge synonymous topic tags. Returns {raw: canonical}."""
     print(f"\nNormalizing vocabulary ({len(raw_tags)} unique raw tags)...")
-    tags_str = json.dumps(sorted(raw_tags), indent=2)
+
     client = _ollama_client()
 
     # Split into chunks if too many tags
@@ -386,7 +384,7 @@ def main() -> None:
     print(f"Topic vocabulary saved: {VOCAB_PATH}")
     print(f"Total rows            : {len(result)}")
     print(f"Unique canonical topics: {len(topic_freq)}")
-    print(f"\nTopic distribution (top 20):")
+    print("\nTopic distribution (top 20):")
     for item in vocab_out[:20]:
         print(f"  {item['topic']:30s}: {item['count']}")
 

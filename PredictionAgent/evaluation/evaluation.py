@@ -23,11 +23,11 @@ OUTPUT:
     Prints metrics to console + saves evaluation_report.json
 """
 
+import argparse
 import json
 import logging
-import sys
 import os
-import argparse
+import sys
 from datetime import datetime
 from typing import Optional
 
@@ -473,7 +473,7 @@ def main():
     args = parser.parse_args()
 
     print(f"\n{'#'*60}")
-    print(f"  FactGuard Evaluation Pipeline")
+    print("  FactGuard Evaluation Pipeline")
     print(f"  Dataset: {args.dataset.upper()} | Samples: {args.samples}")
     print(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'#'*60}")
@@ -492,7 +492,7 @@ def main():
     report = save_report(all_results, args.output)
 
     print(f"\n{'='*60}")
-    print(f"  FINAL SUMMARY")
+    print("  FINAL SUMMARY")
     print(f"  Datasets : {', '.join(report['summary']['datasets_evaluated'])}")
     print(f"  Avg Macro-F1: {report['summary']['avg_macro_f1']:.4f}")
     print(f"{'='*60}\n")

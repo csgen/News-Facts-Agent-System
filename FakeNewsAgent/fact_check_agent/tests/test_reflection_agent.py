@@ -16,7 +16,6 @@ from fact_check_agent.src.agents.reflection_agent import (
     update_source_credibility,
 )
 
-
 # ── source_id_from_url ────────────────────────────────────────────────────────
 
 def test_source_id_from_standard_url():

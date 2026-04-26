@@ -5,18 +5,17 @@ Task 3: Full-Stack & Evaluation Engineer
 Run with: streamlit run frontend/app.py
 """
 
-import sys
 import os
+import sys
 
 # Ensure the project root is on sys.path so imports like `from agents...` work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import streamlit as st
-import plotly.graph_objects as go
-import pandas as pd
-import time
 import threading
-from datetime import datetime, timedelta, timezone
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG (must be first Streamlit call)
@@ -274,7 +273,7 @@ def get_real_entity_history(entity_name: str) -> pd.DataFrame:
         entity_dict = memory.get_entity_by_name(entity_name)
         print(f"[get_entity_history] get_entity_by_name result: {entity_dict}")
         if entity_dict is None:
-            print(f"[get_entity_history] entity NOT found in Neo4j")
+            print("[get_entity_history] entity NOT found in Neo4j")
             st.info(f"No data yet for '{entity_name}'. Fact-check a claim mentioning them first — the tracker runs automatically.")
             return _empty_entity_df()
 
@@ -282,7 +281,7 @@ def get_real_entity_history(entity_name: str) -> pd.DataFrame:
         snapshots = memory.get_entity_snapshots(entity_dict["entity_id"], limit=60)
         print(f"[get_entity_history] snapshots returned: {len(snapshots)}")
         if not snapshots:
-            print(f"[get_entity_history] entity exists but has 0 snapshots")
+            print("[get_entity_history] entity exists but has 0 snapshots")
             st.info(f"'{entity_name}' was found but has no credibility snapshots yet. Check a claim mentioning them and the chart will populate.")
             return _empty_entity_df()
 

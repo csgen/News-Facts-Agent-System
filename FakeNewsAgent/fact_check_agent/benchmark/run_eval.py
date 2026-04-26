@@ -32,15 +32,15 @@ from typing import Optional
 
 from sklearn.metrics import classification_report, f1_score
 
-from fact_check_agent.src.memory_client import close_memory, get_memory
-from fact_check_agent.src.graph.graph import build_graph
-from fact_check_agent.src.models.schemas import FactCheckOutput
 from fact_check_agent.benchmark.record import (
     BenchmarkRecord,
     load_factify2_dataset,
     load_fakenewsnet_dataset,
     load_liar_dataset,
 )
+from fact_check_agent.src.graph.graph import build_graph
+from fact_check_agent.src.memory_client import close_memory, get_memory
+from fact_check_agent.src.models.schemas import FactCheckOutput
 
 logger = logging.getLogger(__name__)
 

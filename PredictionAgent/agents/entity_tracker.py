@@ -20,9 +20,10 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from agents.memory_agent import MemoryAgent, get_memory
 from id_utils import make_id
 from models.credibility import CredibilitySnapshot
+
+from agents.memory_agent import MemoryAgent, get_memory
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +279,7 @@ def run_batch_tracker(entity_names: list[str], window_hours: int = 24,
         results[name] = snapshot
 
     print(f"\n{'#'*60}")
-    print(f"  BATCH COMPLETE")
+    print("  BATCH COMPLETE")
     for name, snap in results.items():
         if snap:
             print(f"  OK {name}: credibility={snap.credibility_score:.2%}")

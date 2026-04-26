@@ -3,7 +3,6 @@ from unittest.mock import MagicMock
 
 from fact_check_agent.src.tools.rag_tool import format_rag_context, retrieve_similar_claims
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def make_memory(ids=None, docs=None, distances=None, verdict_meta=None):

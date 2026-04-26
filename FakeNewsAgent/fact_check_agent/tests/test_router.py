@@ -8,7 +8,6 @@ from fact_check_agent.src.graph.router import (
 )
 from fact_check_agent.src.models.schemas import MemoryQueryResponse, SimilarClaim
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def make_state(max_confidence=None):
@@ -112,6 +111,7 @@ def test_debate_check_returns_skip_when_use_debate_false():
 def test_debate_check_returns_skip_regardless_of_confidence_when_disabled():
     """Even low-confidence outputs should route to skip when debate is disabled."""
     from unittest.mock import MagicMock, patch
+
     from fact_check_agent.src.models.schemas import FactCheckOutput
 
     output = MagicMock(spec=FactCheckOutput)
@@ -124,6 +124,7 @@ def test_debate_check_returns_skip_regardless_of_confidence_when_disabled():
 def test_debate_check_returns_debate_when_enabled_and_low_confidence():
     """When use_debate=True and confidence < threshold → should route to 'debate'."""
     from unittest.mock import MagicMock, patch
+
     from fact_check_agent.src.models.schemas import FactCheckOutput
 
     output = MagicMock(spec=FactCheckOutput)
@@ -137,6 +138,7 @@ def test_debate_check_returns_debate_when_enabled_and_low_confidence():
 def test_debate_check_returns_skip_when_enabled_and_high_confidence():
     """When use_debate=True but confidence >= threshold → skip debate."""
     from unittest.mock import MagicMock, patch
+
     from fact_check_agent.src.models.schemas import FactCheckOutput
 
     output = MagicMock(spec=FactCheckOutput)

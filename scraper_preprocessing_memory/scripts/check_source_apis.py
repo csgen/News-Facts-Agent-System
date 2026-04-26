@@ -37,7 +37,6 @@ from src.scraper.fetchers.reddit import RedditFetcher  # noqa: E402
 from src.scraper.fetchers.rss import RSSFetcher  # noqa: E402
 from src.scraper.fetchers.telegram import TelegramFetcher  # noqa: E402
 
-
 MAX_RESULTS = 2
 
 

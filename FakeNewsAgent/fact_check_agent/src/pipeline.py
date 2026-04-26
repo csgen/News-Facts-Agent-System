@@ -12,14 +12,13 @@ Usage:
     outputs = run_fact_check(preprocessing_output)
 """
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from src._bootstrap import *  # noqa: F401,F403
 from src.models.pipeline import PreprocessingOutput  # memory_agent model
 
-from fact_check_agent.src.memory_client import get_memory
 from fact_check_agent.src.graph.graph import build_graph
+from fact_check_agent.src.memory_client import get_memory
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
 
 logger = logging.getLogger(__name__)

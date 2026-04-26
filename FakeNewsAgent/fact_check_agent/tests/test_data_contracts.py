@@ -11,13 +11,16 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from fact_check_agent.src.tools.live_search_tool import format_search_context
-from fact_check_agent.src.tools.rag_tool import format_rag_context, retrieve_similar_claims
 from fact_check_agent.src.graph.router import CACHE_CONFIDENCE_THRESHOLD, router
 from fact_check_agent.src.models.schemas import (
-    EntityRef, FactCheckInput, FactCheckOutput, MemoryQueryResponse, SimilarClaim,
+    EntityRef,
+    FactCheckInput,
+    FactCheckOutput,
+    MemoryQueryResponse,
+    SimilarClaim,
 )
-
+from fact_check_agent.src.tools.live_search_tool import format_search_context
+from fact_check_agent.src.tools.rag_tool import format_rag_context, retrieve_similar_claims
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -237,8 +240,8 @@ def test_factcheckoutput_accepts_boundary_values():
 
 def test_synthesize_verdict_parses_llm_fields_exactly():
     """Every field from the LLM JSON must land on the output object unchanged."""
-    from fact_check_agent.src.graph.nodes import synthesize_verdict
     from fact_check_agent.src.config import settings
+    from fact_check_agent.src.graph.nodes import synthesize_verdict
 
     llm_payload = {
         "verdict": "refuted",
@@ -268,8 +271,8 @@ def test_synthesize_verdict_parses_llm_fields_exactly():
 
 def test_synthesize_verdict_fallback_on_missing_keys():
     """If LLM returns partial JSON (only verdict), defaults must kick in — not a crash."""
-    from fact_check_agent.src.graph.nodes import synthesize_verdict
     from fact_check_agent.src.config import settings
+    from fact_check_agent.src.graph.nodes import synthesize_verdict
 
     state = {
         "input": make_input(),
@@ -293,8 +296,8 @@ def test_synthesize_verdict_fallback_on_missing_keys():
 
 def test_synthesize_verdict_fallback_on_invalid_json():
     """LLM returning non-JSON must not crash — must return misleading with confidence=0."""
-    from fact_check_agent.src.graph.nodes import synthesize_verdict
     from fact_check_agent.src.config import settings
+    from fact_check_agent.src.graph.nodes import synthesize_verdict
 
     state = {
         "input": make_input(),
