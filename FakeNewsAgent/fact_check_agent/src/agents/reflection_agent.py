@@ -5,12 +5,11 @@ Runs in two directions after each fact-check:
   READ  (query_source_credibility)
         Called by query_memory node BEFORE verdict synthesis.
         Fetches k nearest (source, topic) observations from ChromaDB and returns
-        weighted statistics: credibility_mean, bias_mean, bias_std.
-        These are injected into the synthesis prompt as context.
+        weighted statistics: credibility_mean, sample_count.
 
   WRITE (update_source_credibility)
         Called by write_memory node AFTER verdict synthesis.
-        Appends one new observation (source_id, topic_embedding, credibility, bias)
+        Appends one new observation (source_id, topic_embedding, credibility)
         to the source_credibility collection. Always inserts — never upserts.
 
 Design:
@@ -79,18 +78,13 @@ def query_source_credibility(
     memory: "MemoryAgent",
     k: int = _DEFAULT_K,
 ) -> dict:
-    """Return weighted credibility/bias statistics for (source, topic).
+    """Return weighted credibility statistics for (source, topic).
 
     Returns a dict with keys:
         credibility_mean  float [0, 1]   — weighted mean source credibility
-        bias_mean         float [0, 1]   — weighted mean bias score
-        bias_std          float [0, 1]   — weighted standard deviation of bias
-                                           (high std = inconsistent source)
         sample_count      int            — number of observations retrieved
 
     Returns None-filled stats if fewer than _MIN_SAMPLES observations exist.
-    The None values signal to the caller that there is insufficient history —
-    the synthesis prompt will say "no prior data" rather than fabricating a score.
     """
     source_id = source_id_from_url(source_url)
 
@@ -102,7 +96,7 @@ def query_source_credibility(
         )
     except Exception as exc:
         logger.warning("query_source_credibility failed for %s: %s", source_id, exc)
-        return {"credibility_mean": None, "bias_mean": None, "bias_std": None, "sample_count": 0}
+        return {"credibility_mean": None, "sample_count": 0}
 
     distances = results.get("distances", [[]])[0]
     metadatas = results.get("metadatas", [[]])[0]
@@ -110,8 +104,6 @@ def query_source_credibility(
     if len(metadatas) < _MIN_SAMPLES:
         return {
             "credibility_mean": None,
-            "bias_mean":        None,
-            "bias_std":         None,
             "sample_count":     len(metadatas),
         }
 
@@ -120,19 +112,14 @@ def query_source_credibility(
     W = sum(weights)
 
     cred_mean = sum(w * m["credibility"] for w, m in zip(weights, metadatas)) / W
-    bias_mean = sum(w * m["bias"]        for w, m in zip(weights, metadatas)) / W
-    bias_var  = sum(w * (m["bias"] - bias_mean) ** 2 for w, m in zip(weights, metadatas)) / W
-    bias_std  = math.sqrt(bias_var)
 
     logger.info(
-        "source_credibility: source=%s n=%d cred=%.2f bias=%.2f±%.2f",
-        source_id, len(metadatas), cred_mean, bias_mean, bias_std,
+        "source_credibility: source=%s n=%d cred=%.2f",
+        source_id, len(metadatas), cred_mean,
     )
 
     return {
         "credibility_mean": round(cred_mean, 4),
-        "bias_mean":        round(bias_mean, 4),
-        "bias_std":         round(bias_std, 4),
         "sample_count":     len(metadatas),
     }
 
@@ -145,19 +132,13 @@ def update_source_credibility(
     verdict_id: str,
     verdict_label: str,
     confidence_score: int,
-    bias_score: float,
     memory: "MemoryAgent",
-    topic_text: str = "",
 ) -> None:
-    """Append one new (source, topic, credibility, bias) observation after a verdict.
+    """Append one new (source, topic, credibility) observation after a verdict.
 
     Called by write_memory node. Always inserts — never overwrites. The full
     observation history is preserved so query-time aggregation can weight and
     average across all past verdicts for this (source, topic) region.
-
-    `topic_text` is the coarse topic category for the claim (e.g. "technology").
-    Empty string is acceptable — frontend direct-query path has no preprocessing
-    so no topic is available.
     """
     source_id   = source_id_from_url(source_url)
     credibility = credibility_signal(verdict_label, confidence_score)
@@ -168,17 +149,16 @@ def update_source_credibility(
         memory.add_source_credibility_point(
             point_id      = point_id,
             claim_text    = claim_text,
-            topic_text    = topic_text,
+            topic_text    = claim_text,
             source_id     = source_id,
             credibility   = credibility,
-            bias          = bias_score,
             verdict_label = verdict_label,
             verdict_id    = verdict_id,
             created_at    = created_at,
         )
         logger.info(
-            "update_source_credibility: source=%s cred=%.2f bias=%.2f label=%s",
-            source_id, credibility, bias_score, verdict_label,
+            "update_source_credibility: source=%s cred=%.2f label=%s",
+            source_id, credibility, verdict_label,
         )
     except Exception as exc:
         # Non-fatal — verdict is already written; reflection failure should not

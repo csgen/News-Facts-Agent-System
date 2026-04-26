@@ -35,6 +35,7 @@ class FactCheckInput(BaseModel):
 
     claim_id: str                     # e.g. "clm_abc123" | "liar_2635.json"
     claim_text: str
+    queries: list[str] = Field(default_factory=list)  # pre-decomposed sub-claims from preprocessing; empty = single-claim mode
     entities: list[EntityRef]         # empty [] in benchmark path; filled from Claim in real path
     source_url: str
     article_id: str                   # used to correlate with memory store
@@ -42,7 +43,6 @@ class FactCheckInput(BaseModel):
     image_url: Optional[str] = None       # raw image URL or base64 data URI; used by cross-modal check
     timestamp: datetime
     prefetched_chunks: list[str] = Field(default_factory=list)  # pre-fetched evidence; skips live_search when non-empty
-    topic_text: str = ""              # coarse one-word topic (closed enum); "" for benchmark / synthetic-input paths
 
 
 # ── Output contract: Fact-Check Agent → Frontend / Memory ────────────────────
@@ -56,11 +56,9 @@ class FactCheckOutput(BaseModel):
     confidence_score: int = Field(ge=0, le=100)   # 0–100 int for API; stored as float/100 in memory
     evidence_links: list[str]         # source URLs supporting the verdict
     reasoning: str                    # chain-of-thought explanation
-    bias_score: float = Field(ge=0.0, le=1.0)
     cross_modal_flag: bool = False
     cross_modal_explanation: Optional[str] = None  # one sentence; None if no image or no conflict
-    last_verified_at: Optional[datetime] = None    # populated on cache hits; None on live-search path
-    revalidation_needed: bool = False              # True if freshness_check decided live re-check is required
+    last_verified_at: Optional[datetime] = None    # verified_at of the most recent fresh memory match
 
 
 # ── Memory query types ────────────────────────────────────────────────────────

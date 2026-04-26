@@ -71,10 +71,25 @@ DATASET_ROOT = (
     Path(__file__).resolve().parents[3] / "datasets" / "Factify2" / "Factify 2"
 )
 SPLIT_PATHS = {
-    "train": DATASET_ROOT / "factify2_train" / "factify2" / "train.csv",
-    "val":   DATASET_ROOT / "factify2_train" / "factify2" / "val.csv",
-    "test":  DATASET_ROOT / "factify2_test"  / "test.csv",
+    "train":         DATASET_ROOT / "factify2_train" / "factify2" / "train.csv",
+    "val":           DATASET_ROOT / "factify2_train" / "factify2" / "val.csv",
+    "test":          DATASET_ROOT / "factify2_test"  / "test.csv",
+    "train_curated": DATASET_ROOT / "factify2_train" / "factify2" / "train_curated.csv",
+    "val_curated":   DATASET_ROOT / "factify2_train" / "factify2" / "val_curated.csv",
+    "test_curated":  DATASET_ROOT / "factify2_test"  / "test_curated.csv",
 }
+_LOCAL_IMAGE_MAPPING_PATH = DATASET_ROOT.parent / "url_to_local.json"
+
+
+def _load_url_mapping() -> dict:
+    """Load url→local_path mapping produced by prefetch_images.py, if present."""
+    if _LOCAL_IMAGE_MAPPING_PATH.exists():
+        import json as _json
+        with _LOCAL_IMAGE_MAPPING_PATH.open() as f:
+            mapping = _json.load(f)
+        logger.info("Loaded %d local image mappings from %s", len(mapping), _LOCAL_IMAGE_MAPPING_PATH)
+        return mapping
+    return {}
 
 
 # ── Dataset loader ────────────────────────────────────────────────────────────
@@ -89,7 +104,18 @@ def load_factify2(split: str, limit: Optional[int] = None) -> pd.DataFrame:
     df = df[df["document"].str.strip() != ""]
     if limit:
         df = df.head(limit)
-    return df.reset_index(drop=True)
+    df = df.reset_index(drop=True)
+
+    url_map = _load_url_mapping()
+    if url_map:
+        for col in ("claim_image", "document_image"):
+            if col in df.columns:
+                df[col] = df[col].apply(
+                    lambda u: url_map.get(str(u).strip(), u) if pd.notna(u) else u
+                )
+        logger.info("Applied local image path substitutions to '%s' split", split)
+
+    return df
 
 
 # ── Caption generation (Ollama VLM) ──────────────────────────────────────────
@@ -193,17 +219,16 @@ def build_fact_check_input(row: pd.Series, include_image: bool = True,
     document   = str(row.get("document", "")).strip()
     image_url  = str(row.get("claim_image", "")).strip() or None
 
-    # Truncate document to avoid token limit issues
-    evidence_chunk = f"[REFERENCE DOCUMENT]\n{document[:3000]}"
+    evidence_chunk = f"[REFERENCE DOCUMENT]\n{document}"
 
     # OCR text as additional context when present
     claim_ocr = str(row.get("Claim OCR", "")).strip()
     if claim_ocr and claim_ocr not in ("nan", " ", ""):
-        evidence_chunk += f"\n\n[CLAIM IMAGE OCR]\n{claim_ocr[:500]}"
+        evidence_chunk += f"\n\n[CLAIM IMAGE OCR]\n{claim_ocr}"
 
     doc_ocr = str(row.get("Document OCR", "")).strip()
     if doc_ocr and doc_ocr not in ("nan", " ", ""):
-        evidence_chunk += f"\n\n[DOCUMENT IMAGE OCR]\n{doc_ocr[:500]}"
+        evidence_chunk += f"\n\n[DOCUMENT IMAGE OCR]\n{doc_ocr}"
 
     # Derive source_url from claim_image domain or use placeholder
     source_url = "https://factify2.benchmark/unknown"
@@ -231,11 +256,11 @@ def build_fact_check_input(row: pd.Series, include_image: bool = True,
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
 
-def compute_metrics(records: list[dict]) -> dict:
+def compute_metrics(records: list[dict], pred_key: str = "pred_verdict") -> dict:
     """Compute accuracy, per-class F1, and confusion matrix from result records."""
     labels = ["supported", "refuted", "misleading"]
-    y_true = [r["true_verdict"] for r in records if r["pred_verdict"] is not None]
-    y_pred = [r["pred_verdict"] for r in records if r["pred_verdict"] is not None]
+    y_true = [r["true_verdict"] for r in records if r.get(pred_key) is not None]
+    y_pred = [r[pred_key]       for r in records if r.get(pred_key) is not None]
     n = len(y_true)
     if n == 0:
         return {"accuracy": 0.0, "n": 0}
@@ -266,7 +291,7 @@ def compute_metrics(records: list[dict]) -> dict:
     # Error analysis
     n_errors = n - correct
     cross_modal_flagged = sum(1 for r in records if r.get("cross_modal_flag"))
-    mean_confidence = sum(r.get("confidence_score", 0) for r in records if r["pred_verdict"]) / n
+    mean_confidence = sum(r.get("confidence_score", 0) for r in records if r.get(pred_key)) / n
 
     return {
         "n": n,
@@ -281,10 +306,201 @@ def compute_metrics(records: list[dict]) -> dict:
     }
 
 
+def _degrees_to_verdict(degrees: list[float]) -> tuple[str, int]:
+    """Convert a list of Di scores to (verdict_label, confidence_0_100)."""
+    V = sum(degrees) / len(degrees)
+    if V > 0.2:
+        verdict = "supported"
+    elif V < -0.2:
+        verdict = "refuted"
+    else:
+        verdict = "misleading"
+    volume_factor = min(1.0, len(degrees) / 6.0)
+    confidence = int(min(97, max(15, abs(V) * 100 * (0.4 + 0.6 * volume_factor))))
+    return verdict, confidence
+
+
+def _run_debate(
+    claim_text: str,
+    context_claims: list[dict],
+    numbered_block: str,
+    neutral_degrees: list[float],
+    client,
+    model: str,
+) -> tuple[str, int, str]:
+    """Run Supporter → Skeptic → Judge on top of neutral Di scores.
+
+    Returns: (verdict_label, confidence_0_100, reasoning)
+    Falls back to neutral verdict on any failure.
+    """
+    from fact_check_agent.src.graph.nodes import _format_neutral_scores_block
+    from fact_check_agent.src.prompts import JUDGE_PROMPT, SKEPTIC_PROMPT, SUPPORTER_PROMPT
+    from fact_check_agent.src.agents.context_claim_agent import _parse_json
+
+    neutral_block = _format_neutral_scores_block(context_claims, neutral_degrees)
+
+    def _call(prompt_text: str) -> str:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt_text}],
+            temperature=0.3,
+        )
+        return resp.choices[0].message.content.strip()
+
+    try:
+        supporter_raw = _call(SUPPORTER_PROMPT.format(
+            claim_text=claim_text,
+            numbered_claims=numbered_block,
+            neutral_scores_block=neutral_block,
+        ))
+        skeptic_raw = _call(SKEPTIC_PROMPT.format(
+            claim_text=claim_text,
+            numbered_claims=numbered_block,
+            neutral_scores_block=neutral_block,
+        ))
+        judge_raw = _call(JUDGE_PROMPT.format(
+            claim_text=claim_text,
+            numbered_claims=numbered_block,
+            neutral_scores_block=neutral_block,
+            supporter_adjustments=supporter_raw,
+            skeptic_adjustments=skeptic_raw,
+        ))
+
+        judge_result = _parse_json(judge_raw)
+        final_scores = {
+            item["evidence_id"]: float(item["final_D"])
+            for item in judge_result.get("final_scores", [])
+        }
+        stalemates = sum(1 for item in judge_result.get("final_scores", []) if item.get("stalemate"))
+
+        final_degrees = [
+            final_scores.get(i + 1, neutral_degrees[i] if i < len(neutral_degrees) else 0.0)
+            for i in range(len(context_claims))
+        ]
+
+        verdict, confidence = _degrees_to_verdict(final_degrees)
+        if stalemates:
+            confidence = max(15, confidence - min(15, stalemates * 5))
+
+        supporter_adj = _parse_json(supporter_raw).get("adjustments", [])
+        skeptic_adj   = _parse_json(skeptic_raw).get("adjustments", [])
+        debate_summary = judge_result.get("debate_summary", "")
+        reasoning = f"{debate_summary}\n\n[Debate: {len(supporter_adj)} boosts, {len(skeptic_adj)} penalties, {stalemates} stalemates]"
+        return verdict, confidence, reasoning
+
+    except Exception as e:
+        logger.warning("debate failed (%s) — falling back to neutral verdict", e)
+        verdict, confidence = _degrees_to_verdict(neutral_degrees)
+        return verdict, confidence, f"Debate failed: {e}"
+
+
+def _run_factify2_verdict_pipeline(
+    claim_text: str,
+    prefetched_chunks: list[str],
+    run_both: bool = False,
+) -> tuple:
+    """Lightweight Factify2 verdict pipeline.
+
+    Document chunks → factual/counter-factual Q&A → VERDICT_SYNTHESIS_PROMPT →
+    simple unweighted Di average → Factify label.
+
+    Bypasses freshness check, Tavily, memory, and source credibility weighting
+    since all evidence comes from the same prefetched document.
+
+    Args:
+        run_both: if True, also run the debate agents and return both verdicts.
+
+    Returns:
+        run_both=False: (verdict_label, confidence_0_100, reasoning)
+        run_both=True:  (nodebate_verdict, nodebate_conf, nodebate_reasoning,
+                         debate_verdict,   debate_conf,   debate_reasoning)
+    """
+    from fact_check_agent.src.agents import context_claim_agent
+    from fact_check_agent.src.graph.nodes import _format_numbered_context_claims
+    from fact_check_agent.src.prompts import VERDICT_SYNTHESIS_PROMPT
+    from fact_check_agent.src.agents.context_claim_agent import _parse_json
+    import fact_check_agent.src.llm_factory as _llm_factory
+
+    # Step 1–3: generate questions + extract answers from document
+    claims = context_claim_agent.run(
+        claim_text        = claim_text,
+        fresh_context     = [],
+        prefetched_chunks = prefetched_chunks,
+        tavily_api_key    = "",
+    )
+
+    if not claims:
+        logger.warning("context_claim_agent returned no claims — falling back to direct synthesis")
+        raw_doc = "\n".join(prefetched_chunks)[:40000]
+        if not raw_doc.strip():
+            if run_both:
+                return "misleading", 15, "No evidence.", "misleading", 15, "No evidence."
+            return "misleading", 15, "No evidence extracted and document is empty."
+        claims = [{
+            "type":        "factual",
+            "question":    None,
+            "content":     raw_doc[:2000],
+            "source_name": None,
+            "timestamp":   None,
+            "verdict":     None,
+            "confidence":  None,
+            "source":      "prefetched",
+            "source_url":  None,
+        }]
+
+    # Step 4: neutral verdict synthesis
+    numbered_block = _format_numbered_context_claims(claims)
+    prompt = VERDICT_SYNTHESIS_PROMPT.format(
+        claim_text      = claim_text,
+        numbered_claims = numbered_block,
+    )
+
+    model  = _llm_factory.llm_model_name()
+    client = _llm_factory.make_llm_client()
+    try:
+        response = client.chat.completions.create(
+            model           = model,
+            messages        = [{"role": "user", "content": prompt}],
+            response_format = {"type": "json_object"},
+            temperature     = 0,
+        )
+        result = _parse_json(response.choices[0].message.content or "")
+    except Exception as e:
+        err = f"Verdict synthesis failed: {e}"
+        if run_both:
+            return "misleading", 50, err, "misleading", 50, err
+        return "misleading", 50, err
+
+    degrees  = [float(x) for x in result.get("degrees", [])]
+    reasoning = result.get("reasoning", "")
+
+    if not degrees:
+        msg = reasoning or "No degrees returned."
+        if run_both:
+            return "misleading", 50, msg, "misleading", 50, msg
+        return "misleading", 50, msg
+
+    # Step 5: no-debate verdict from neutral Di
+    nd_verdict, nd_confidence = _degrees_to_verdict(degrees)
+
+    if not run_both:
+        return nd_verdict, nd_confidence, reasoning
+
+    # Step 6 (run_both): debate agents fork from the same neutral Di
+    db_verdict, db_confidence, db_reasoning = _run_debate(
+        claim_text, claims, numbered_block, degrees, client, model
+    )
+    return nd_verdict, nd_confidence, reasoning, db_verdict, db_confidence, db_reasoning
+
+
 def print_metrics(metrics: dict, settings_snapshot: dict) -> None:
     print("\n" + "=" * 60)
     print("FACTIFY2 BENCHMARK RESULTS")
     print("=" * 60)
+    if metrics.get("n", 0) == 0:
+        print("  No predictions made — all records errored.")
+        print("=" * 60)
+        return
     print(f"  n={metrics['n']}  accuracy={metrics['accuracy']:.3f}  macro_F1={metrics['macro_f1']:.3f}")
     print(f"  mean_confidence={metrics['mean_confidence']:.1f}  cross_modal_flagged={metrics['cross_modal_flagged']} ({metrics['cross_modal_flag_rate']:.1%})")
     print()
@@ -315,11 +531,15 @@ def run_benchmark(
     limit: Optional[int] = 200,
     output_path: Optional[str] = None,
     include_image: bool = True,
+    data_path: Optional[str] = None,
+    run_both: bool = False,
 ) -> dict:
     """Run the benchmark and return metrics dict.
 
     All inference is local (Ollama). Document is injected directly as evidence
     (Option A) so Tavily is never called.
+
+    data_path: if set, load from this TSV file instead of the standard Factify2 split.
     """
     # Bootstrap path resolution for memory_agent imports
     _root = Path(__file__).resolve().parents[3]
@@ -340,8 +560,6 @@ def run_benchmark(
         os.environ.setdefault(key, default)
 
     from fact_check_agent.src.config import settings
-    from fact_check_agent.src.graph.graph import build_graph
-    from fact_check_agent.src.memory_client import get_memory
 
     settings_snapshot = {
         "llm_provider":            settings.llm_provider,
@@ -356,8 +574,18 @@ def run_benchmark(
         "limit":                   limit,
     }
 
-    print(f"\nLoading Factify2 {split} split (limit={limit})...")
-    df = load_factify2(split, limit)
+    if data_path:
+        print(f"\nLoading dataset from {data_path} (limit={limit})...")
+        df = pd.read_csv(data_path, sep="\t", engine="python", on_bad_lines="skip")
+        df = df.dropna(subset=["claim", "document"])
+        df = df[df["claim"].str.strip() != ""]
+        df = df[df["document"].str.strip() != ""]
+        if limit:
+            df = df.head(limit)
+        df = df.reset_index(drop=True)
+    else:
+        print(f"\nLoading Factify2 {split} split (limit={limit})...")
+        df = load_factify2(split, limit)
     print(f"  {len(df)} records loaded")
 
     # Pre-generate VLM captions if a vision model is configured and images are enabled.
@@ -368,37 +596,6 @@ def run_benchmark(
         print(f"\nPre-generating image captions (VLM: {settings.ollama_vlm_model})...")
         caption_cache = generate_captions_for_df(df, settings.ollama_vlm_model, settings.ollama_base_url)
         print(f"  {sum(1 for v in caption_cache.values() if v)} captions available")
-
-    if settings.offline_mode:
-        print("Offline mode — skipping MemoryAgent connection")
-        from unittest.mock import MagicMock
-        memory = MagicMock()
-        memory.search_similar_claims.return_value = {"ids": [[]], "documents": [[]], "distances": [[]], "metadatas": [[]]}
-        memory.get_entity_context.return_value = []
-        memory.get_entity_ids_for_claims.return_value = []
-        memory.get_graph_claims_for_entities.return_value = []
-        memory.get_verdict_by_claim.return_value = {"ids": [], "metadatas": []}
-        memory.add_verdict.return_value = None
-        memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
-        memory.add_source_credibility_point.return_value = None
-    else:
-        print("Connecting to MemoryAgent...")
-        try:
-            memory = get_memory()
-        except Exception as e:
-            print(f"  WARNING: MemoryAgent unavailable ({e}). Running without memory (no cache path).")
-            from unittest.mock import MagicMock
-            memory = MagicMock()
-            memory.search_similar_claims.return_value = {"ids": [[]], "documents": [[]], "distances": [[]], "metadatas": [[]]}
-            memory.get_entity_context.return_value = []
-            memory.get_entity_ids_for_claims.return_value = []
-            memory.get_graph_claims_for_entities.return_value = []
-            memory.get_verdict_by_claim.return_value = {"ids": [], "metadatas": []}
-            memory.add_verdict.return_value = None
-            memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
-            memory.add_source_credibility_point.return_value = None
-
-    graph = build_graph(memory)
 
     results: list[dict] = []
     n_errors = 0
@@ -418,28 +615,43 @@ def run_benchmark(
             print(f"   {fact_input.claim_text[:100]}{'…' if len(fact_input.claim_text) > 100 else ''}")
 
             t_claim = time.time()
-            state = graph.invoke({"input": fact_input})
-            output = state.get("output")
+            if run_both:
+                nd_verdict, nd_conf, nd_reasoning, db_verdict, db_conf, db_reasoning = \
+                    _run_factify2_verdict_pipeline(
+                        claim_text        = fact_input.claim_text,
+                        prefetched_chunks = list(fact_input.prefetched_chunks),
+                        run_both          = True,
+                    )
+                pred_verdict = nd_verdict
+                confidence   = nd_conf
+                reasoning    = nd_reasoning
+            else:
+                pred_verdict, confidence, reasoning = _run_factify2_verdict_pipeline(
+                    claim_text        = fact_input.claim_text,
+                    prefetched_chunks = list(fact_input.prefetched_chunks),
+                )
+                db_verdict = db_conf = db_reasoning = None
 
-            claim_elapsed = time.time() - t_claim
-            pred_verdict    = output.verdict          if output else None
-            confidence      = output.confidence_score if output else None
-            cross_modal_flag= output.cross_modal_flag if output else False
-            cross_modal_exp = output.cross_modal_explanation if output else None
-            reasoning       = output.reasoning        if output else ""
-            bias_score      = output.bias_score       if output else None
-            correct_mark = "✓" if pred_verdict == true_verdict else "✗"
-            print(f"   {correct_mark} pred={pred_verdict}  true={true_verdict}  conf={confidence}  {claim_elapsed:.1f}s")
+            claim_elapsed    = time.time() - t_claim
+            cross_modal_flag = False
+            cross_modal_exp  = None
+
+            nd_mark = "✓" if pred_verdict == true_verdict else "✗"
+            if run_both:
+                db_mark = "✓" if db_verdict == true_verdict else "✗"
+                print(f"   no-debate: {nd_mark} pred={pred_verdict}  conf={nd_conf}")
+                print(f"   debate:    {db_mark} pred={db_verdict}  conf={db_conf}  [{claim_elapsed:.1f}s]")
+            else:
+                print(f"   {nd_mark} pred={pred_verdict}  true={true_verdict}  conf={confidence}  {claim_elapsed:.1f}s")
 
         except Exception as e:
             logger.error("Record %d failed: %s", i, e)
             n_errors += 1
-            pred_verdict = None
-            confidence = None
+            pred_verdict = db_verdict = None
+            confidence = db_conf = None
             cross_modal_flag = False
             cross_modal_exp = None
-            reasoning = f"ERROR: {e}"
-            bias_score = None
+            reasoning = db_reasoning = f"ERROR: {e}"
 
         record = {
             "row_idx":            str(row.get("Unnamed: 0", i)),
@@ -448,13 +660,17 @@ def run_benchmark(
             "true_verdict":       true_verdict,
             "pred_verdict":       pred_verdict,
             "confidence_score":   confidence,
-            "bias_score":         bias_score,
             "cross_modal_flag":   cross_modal_flag,
             "cross_modal_explanation": cross_modal_exp,
             "correct":            pred_verdict == true_verdict if pred_verdict else False,
-            "reasoning":          reasoning[:300],
+            "reasoning":          reasoning[:300] if reasoning else None,
             "has_claim_image":    bool(str(row.get("claim_image", "")).strip() not in ("", "nan")),
         }
+        if run_both:
+            record["pred_verdict_debate"]   = db_verdict
+            record["confidence_debate"]     = db_conf
+            record["correct_debate"]        = db_verdict == true_verdict if db_verdict else False
+            record["reasoning_debate"]      = db_reasoning[:300] if db_reasoning else None
         results.append(record)
 
         # Progress reporting
@@ -462,15 +678,24 @@ def run_benchmark(
         if done % 10 == 0 or done == len(df):
             elapsed = time.time() - start_time
             acc_so_far = sum(1 for r in results if r["correct"]) / len(results)
-            print(f"  [{done:>4}/{len(df)}] acc={acc_so_far:.3f}  errors={n_errors}  elapsed={elapsed:.0f}s")
+            if run_both:
+                acc_db = sum(1 for r in results if r.get("correct_debate")) / len(results)
+                print(f"  [{done:>4}/{len(df)}] no-debate acc={acc_so_far:.3f}  debate acc={acc_db:.3f}  errors={n_errors}  elapsed={elapsed:.0f}s")
+            else:
+                print(f"  [{done:>4}/{len(df)}] acc={acc_so_far:.3f}  errors={n_errors}  elapsed={elapsed:.0f}s")
 
     total_time = time.time() - start_time
     metrics = compute_metrics(results)
     metrics["total_time_s"] = round(total_time, 1)
     metrics["n_pipeline_errors"] = n_errors
     metrics["settings"] = settings_snapshot
+    if run_both:
+        metrics["debate"] = compute_metrics(results, pred_key="pred_verdict_debate")
 
     print_metrics(metrics, settings_snapshot)
+    if run_both:
+        print("\n── Debate metrics ──────────────────────────────────────────")
+        print_metrics(metrics["debate"], {**settings_snapshot, "mode": "debate"})
 
     # Save results
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -499,7 +724,7 @@ def run_benchmark(
 
 def main():
     parser = argparse.ArgumentParser(description="Factify2 benchmark for the Fact-Check Agent")
-    parser.add_argument("--split",    default="val", choices=["val", "train", "test"],
+    parser.add_argument("--split",    default="val", choices=["val", "train", "test", "val_curated", "test_curated", "train_curated"],
                         help="Dataset split to evaluate (default: val)")
     parser.add_argument("--limit",    type=int, default=200,
                         help="Max records to evaluate (default: 200; set 0 for full split)")
@@ -511,6 +736,10 @@ def main():
                         help="Skip all DB writes (ChromaDB + Neo4j) — benchmark only")
     parser.add_argument("--offline", action="store_true",
                         help="Skip all DB reads+writes — no Docker needed, implies --dry-run")
+    parser.add_argument("--data-path", default=None,
+                        help="Path to a custom TSV dataset (overrides --split)")
+    parser.add_argument("--both", action="store_true",
+                        help="Run both no-debate and debate in a single pass and compare")
     args = parser.parse_args()
 
     if args.offline:
@@ -525,6 +754,8 @@ def main():
         limit        = limit,
         output_path  = args.out,
         include_image= not args.no_image,
+        data_path    = args.data_path,
+        run_both     = args.both,
     )
 
 

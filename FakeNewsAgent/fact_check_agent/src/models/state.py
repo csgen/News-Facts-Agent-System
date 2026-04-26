@@ -1,5 +1,4 @@
 """LangGraph state schema for the Fact-Check Agent graph."""
-from datetime import datetime
 from typing import Optional, TypedDict
 
 from fact_check_agent.src.models.schemas import (
@@ -14,29 +13,33 @@ class FactCheckState(TypedDict):
     input: FactCheckInput
 
     # ── Memory query results ──────────────────────────────────────────────────
-    memory_results: Optional[MemoryQueryResponse]  # None until query_memory runs
-    entity_context: list[dict]                     # from MemoryAgent.get_entity_context()
+    memory_results: Optional[MemoryQueryResponse]
+    entity_context: list[dict]
 
-    # ── Routing ───────────────────────────────────────────────────────────────
-    route: Optional[str]               # "cache" | "live_search"
-    revalidation_needed: Optional[bool]  # set by freshness_check; True → re-run live search
-    retrieval_gate_needed: Optional[bool]  # S2: set by retrieval_gate; False → skip Tavily
+    # ── Freshness-tagged memory context ──────────────────────────────────────
+    fresh_context: list[dict]
+    stale_context: list[dict]
 
-    # ── Intermediate fact-check data ──────────────────────────────────────────
-    retrieved_chunks: list[str]       # live search result + RAG context blocks
-    sub_claims: list[str]             # SOTA: claim decomposition (unused in baseline)
-    debate_transcript: Optional[str]  # SOTA: multi-agent debate (unused in baseline)
+    # ── Context claims (from context_claim_agent) ─────────────────────────────
+    context_claims: list[dict]
+
+    # ── Prefetched chunks (benchmark mode — Factify2 doc + OCR) ──────────────
+    retrieved_chunks: list[str]
+
+    # ── Neutral synthesis output (fed into Supporter + Skeptic) ──────────────
+    neutral_degrees: list[float]
+    neutral_reasoning: Optional[str]
+
+    # ── Multi-agent debate ────────────────────────────────────────────────────
+    debate_transcript: Optional[str]
 
     # ── Source credibility (from Reflection Agent) ────────────────────────────
-    source_credibility: Optional[dict]  # keys: credibility_mean, bias_mean, bias_std, sample_count
+    source_credibility: Optional[dict]
 
-    # ── Cross-modal ────────────────────────────────────────────────────────────
+    # ── Cross-modal ───────────────────────────────────────────────────────────
     cross_modal_flag: bool
     cross_modal_explanation: Optional[str]
-    clip_similarity_score: Optional[float]  # SOTA: CLIP scoring (unused in baseline)
-
-    # ── Freshness ─────────────────────────────────────────────────────────────
-    last_verified_at: Optional[datetime]   # from best cache hit; None on live-search path
+    clip_similarity_score: Optional[float]
 
     # ── Final output ──────────────────────────────────────────────────────────
     output: Optional[FactCheckOutput]
@@ -46,16 +49,16 @@ class FactCheckState(TypedDict):
 INITIAL_STATE: dict = {
     "memory_results":          None,
     "entity_context":          [],
-    "route":                   None,
-    "revalidation_needed":     None,
-    "retrieval_gate_needed":   None,
+    "fresh_context":           [],
+    "stale_context":           [],
+    "context_claims":          [],
     "retrieved_chunks":        [],
-    "sub_claims":              [],
+    "neutral_degrees":         [],
+    "neutral_reasoning":       None,
     "debate_transcript":       None,
     "source_credibility":      None,
     "cross_modal_flag":        False,
     "cross_modal_explanation": None,
     "clip_similarity_score":   None,
-    "last_verified_at":        None,
     "output":                  None,
 }
