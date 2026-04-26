@@ -4,7 +4,6 @@ import re
 from fact_check_agent.src.prompts import (
     CHUNK_RELEVANCE_PROMPT,
     CROSS_MODAL_PROMPT,
-    DECOMPOSITION_PROMPT,
     IS_RETRIEVAL_NEEDED_PROMPT,
     JUDGE_PROMPT,
     SKEPTIC_PROMPT,
@@ -36,10 +35,6 @@ def test_chunk_relevance_has_required_placeholders():
     assert required.issubset(placeholders(CHUNK_RELEVANCE_PROMPT))
 
 
-def test_decomposition_has_required_placeholders():
-    assert "claim_text" in placeholders(DECOMPOSITION_PROMPT)
-
-
 def test_supporter_has_required_placeholders():
     required = {"claim_text", "numbered_claims", "neutral_scores_block"}
     assert required.issubset(placeholders(SUPPORTER_PROMPT))
@@ -62,7 +57,6 @@ def test_all_prompts_are_non_empty():
         CROSS_MODAL_PROMPT,
         IS_RETRIEVAL_NEEDED_PROMPT,
         CHUNK_RELEVANCE_PROMPT,
-        DECOMPOSITION_PROMPT,
         SUPPORTER_PROMPT,
         SKEPTIC_PROMPT,
         JUDGE_PROMPT,

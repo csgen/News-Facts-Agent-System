@@ -3,7 +3,7 @@
 Covers:
   - source_id_from_url: URL → source_id derivation
   - credibility_signal: verdict + confidence → [0,1] credibility observation
-  - query_source_credibility: k-NN weighted aggregation (mean, bias_mean, bias_std)
+  - query_source_credibility: k-NN weighted aggregation (credibility_mean)
   - update_source_credibility: delegates correctly to MemoryAgent
 """
 from unittest.mock import MagicMock, call, patch
@@ -79,13 +79,13 @@ def test_credibility_signal_boundary_values():
 
 # ── query_source_credibility ──────────────────────────────────────────────────
 
-def make_chroma_results(distances, credibilities, biases):
+def make_chroma_results(distances, credibilities):
     """Build a ChromaDB-style query result dict."""
     metadatas = [
-        {"credibility": c, "bias": b, "source_id": "src_test_com",
+        {"credibility": c, "source_id": "src_test_com",
          "topic_text": "test", "verdict_label": "supported",
          "verdict_id": f"vrd_{i}", "created_at": "2024-01-01T00:00:00+00:00"}
-        for i, (c, b) in enumerate(zip(credibilities, biases))
+        for i, c in enumerate(credibilities)
     ]
     return {"distances": [distances], "metadatas": [metadatas]}
 
@@ -97,7 +97,6 @@ def test_query_returns_weighted_mean():
     memory.query_source_credibility.return_value = make_chroma_results(
         distances=[0.1, 0.1],
         credibilities=[1.0, 0.0],
-        biases=[0.2, 0.8],
     )
 
     result = query_source_credibility("any claim", "https://test.com", memory)
@@ -112,7 +111,6 @@ def test_query_closer_neighbour_weighted_more():
     memory.query_source_credibility.return_value = make_chroma_results(
         distances=[0.1, 0.9],
         credibilities=[1.0, 0.0],  # close = high credibility, far = low
-        biases=[0.1, 0.9],
     )
 
     result = query_source_credibility("any claim", "https://test.com", memory)
@@ -121,53 +119,22 @@ def test_query_closer_neighbour_weighted_more():
     assert result["credibility_mean"] > 0.5
 
 
-def test_query_bias_std_high_when_inconsistent():
-    """High bias variance should be reflected in bias_std."""
-    memory = MagicMock()
-    memory.query_source_credibility.return_value = make_chroma_results(
-        distances=[0.1, 0.1],
-        credibilities=[0.5, 0.5],
-        biases=[0.0, 1.0],  # extreme values → high std
-    )
-
-    result = query_source_credibility("any claim", "https://test.com", memory)
-
-    assert result["bias_std"] > 0.3
-
-
-def test_query_bias_std_low_when_consistent():
-    """Low bias variance should produce a near-zero bias_std."""
-    memory = MagicMock()
-    memory.query_source_credibility.return_value = make_chroma_results(
-        distances=[0.1, 0.1, 0.1],
-        credibilities=[0.8, 0.8, 0.8],
-        biases=[0.2, 0.2, 0.2],  # all the same → std = 0
-    )
-
-    result = query_source_credibility("any claim", "https://test.com", memory)
-
-    assert result["bias_std"] < 1e-6
-
-
 def test_query_insufficient_samples_returns_none_stats():
-    """Fewer than _MIN_SAMPLES observations → all stat fields are None."""
+    """Fewer than _MIN_SAMPLES observations → credibility_mean is None."""
     memory = MagicMock()
     memory.query_source_credibility.return_value = make_chroma_results(
         distances=[0.1],
         credibilities=[0.9],
-        biases=[0.1],
     )
 
     result = query_source_credibility("any claim", "https://test.com", memory, k=20)
 
     assert result["credibility_mean"] is None
-    assert result["bias_mean"]        is None
-    assert result["bias_std"]         is None
     assert result["sample_count"]     == 1
 
 
 def test_query_empty_results_returns_none_stats():
-    """Zero observations → all stat fields are None, sample_count = 0."""
+    """Zero observations → credibility_mean is None, sample_count = 0."""
     memory = MagicMock()
     memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
 
@@ -212,7 +179,6 @@ def test_update_calls_memory_add():
         verdict_id      = "vrd_abc123",
         verdict_label   = "supported",
         confidence_score= 80,
-        bias_score      = 0.3,
         memory          = memory,
     )
 
@@ -227,7 +193,7 @@ def test_update_point_id_format():
     update_source_credibility(
         claim_text="Claim.", source_url="https://example.com",
         verdict_id="vrd_xyz789", verdict_label="refuted",
-        confidence_score=70, bias_score=0.6, memory=memory,
+        confidence_score=70, memory=memory,
     )
 
     call_kwargs = memory.add_source_credibility_point.call_args.kwargs
@@ -242,7 +208,7 @@ def test_update_credibility_signal_applied():
     update_source_credibility(
         claim_text="Claim.", source_url="https://example.com",
         verdict_id="vrd_1", verdict_label="refuted",
-        confidence_score=80, bias_score=0.5, memory=memory,
+        confidence_score=80, memory=memory,
     )
 
     call_kwargs = memory.add_source_credibility_point.call_args.kwargs
@@ -259,5 +225,5 @@ def test_update_memory_failure_does_not_raise():
     update_source_credibility(
         claim_text="Claim.", source_url="https://example.com",
         verdict_id="vrd_1", verdict_label="supported",
-        confidence_score=80, bias_score=0.3, memory=memory,
+        confidence_score=80, memory=memory,
     )

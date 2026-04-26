@@ -11,7 +11,6 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from fact_check_agent.src.graph.router import CACHE_CONFIDENCE_THRESHOLD, router
 from fact_check_agent.src.models.schemas import (
     EntityRef,
     FactCheckInput,
@@ -178,28 +177,6 @@ def test_retrieve_claim_text_is_document_not_id():
     assert results[0]["claim_id"]   == "clm_001"
 
 
-# ── Router boundary conditions ────────────────────────────────────────────────
-
-def test_router_boundary_exactly_at_threshold_goes_to_cache():
-    """max_confidence == 0.80 exactly must route to cache (>= not >)."""
-    state = {"memory_results": MemoryQueryResponse(
-        results=[SimilarClaim(claim_id="c1", claim_text="x", verdict_label="refuted",
-                              verdict_confidence=0.80, distance=0.1)],
-        max_confidence=0.80,
-    )}
-    assert router(state) == "cache"
-
-
-def test_router_one_below_threshold_goes_to_live_search():
-    """max_confidence == 0.799 must NOT route to cache."""
-    state = {"memory_results": MemoryQueryResponse(
-        results=[SimilarClaim(claim_id="c1", claim_text="x", verdict_label="refuted",
-                              verdict_confidence=0.799, distance=0.1)],
-        max_confidence=0.799,
-    )}
-    assert router(state) == "live_search"
-
-
 # ── FactCheckOutput: field constraints ───────────────────────────────────────
 
 def test_factcheckoutput_rejects_confidence_above_100():
@@ -210,19 +187,7 @@ def test_factcheckoutput_rejects_confidence_above_100():
         FactCheckOutput(
             verdict_id="vrd_1", claim_id="clm_1", verdict="supported",
             confidence_score=101,   # invalid
-            evidence_links=[], reasoning="test", bias_score=0.5,
-        )
-
-
-def test_factcheckoutput_rejects_bias_above_1():
-    """Pydantic must reject bias_score > 1.0."""
-    import pytest
-    from pydantic import ValidationError
-    with pytest.raises(ValidationError):
-        FactCheckOutput(
-            verdict_id="vrd_1", claim_id="clm_1", verdict="refuted",
-            confidence_score=50, evidence_links=[], reasoning="test",
-            bias_score=1.5,   # invalid
+            evidence_links=[], reasoning="test",
         )
 
 
@@ -231,29 +196,24 @@ def test_factcheckoutput_accepts_boundary_values():
     for score in (0, 100):
         o = FactCheckOutput(
             verdict_id="vrd_1", claim_id="clm_1", verdict="misleading",
-            confidence_score=score, evidence_links=[], reasoning="x", bias_score=0.0,
+            confidence_score=score, evidence_links=[], reasoning="x",
         )
         assert o.confidence_score == score
 
 
 # ── synthesize_verdict: LLM response parsing ─────────────────────────────────
 
-def test_synthesize_verdict_parses_llm_fields_exactly():
-    """Every field from the LLM JSON must land on the output object unchanged."""
+def test_synthesize_verdict_strong_support_gives_supported():
+    """All Di=1.0 (strong support) must produce a 'supported' verdict."""
     from fact_check_agent.src.config import settings
     from fact_check_agent.src.graph.nodes import synthesize_verdict
 
-    llm_payload = {
-        "verdict": "refuted",
-        "confidence_score": 72,
-        "bias_score": 0.6,
-        "reasoning": "Three independent studies contradict this claim.",
-        "evidence_links": ["https://reuters.com/study", "https://bbc.co.uk/report"],
-    }
+    # One prefetched chunk → one context claim, Di=1.0 → V=1.0 → supported
+    llm_payload = {"degrees": [1.0], "reasoning": "Strong peer-reviewed evidence."}
     state = {
-        "input": make_input(),
-        "retrieved_chunks": ["Evidence chunk 1"],
-        "entity_context": [],
+        "input": make_input(prefetched_chunks=["Peer-reviewed evidence chunk."]),
+        "context_claims": [{"type": "factual", "source": "prefetched",
+                            "content": "Peer-reviewed evidence chunk.", "question": None}],
         "memory_results": MemoryQueryResponse(results=[], max_confidence=0.0),
     }
 
@@ -262,47 +222,63 @@ def test_synthesize_verdict_parses_llm_fields_exactly():
         updates = synthesize_verdict(state, settings)
 
     out = updates["output"]
-    assert out.verdict           == "refuted"
-    assert out.confidence_score  == 72
-    assert abs(out.bias_score - 0.6) < 1e-9
-    assert out.reasoning         == "Three independent studies contradict this claim."
-    assert out.evidence_links    == ["https://reuters.com/study", "https://bbc.co.uk/report"]
+    assert out.verdict == "supported"
+    assert out.confidence_score > 0
+    assert out.reasoning == "Strong peer-reviewed evidence."
 
 
-def test_synthesize_verdict_fallback_on_missing_keys():
-    """If LLM returns partial JSON (only verdict), defaults must kick in — not a crash."""
+def test_synthesize_verdict_strong_refutation_gives_refuted():
+    """All Di=-1.0 (strong refutation) must produce a 'refuted' verdict."""
+    from fact_check_agent.src.config import settings
+    from fact_check_agent.src.graph.nodes import synthesize_verdict
+
+    llm_payload = {"degrees": [-1.0], "reasoning": "Direct contradiction found."}
+    state = {
+        "input": make_input(prefetched_chunks=["Direct contradiction chunk."]),
+        "context_claims": [{"type": "counter_factual", "source": "tavily",
+                            "content": "Contradicting evidence.", "question": None}],
+        "memory_results": MemoryQueryResponse(results=[], max_confidence=0.0),
+    }
+
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_cls:
+        mock_cls.return_value.chat.completions.create.return_value = make_llm_response(llm_payload)
+        updates = synthesize_verdict(state, settings)
+
+    out = updates["output"]
+    assert out.verdict == "refuted"
+    assert out.confidence_score > 0
+
+
+def test_synthesize_verdict_fallback_on_missing_degrees():
+    """If LLM returns no degrees, defaults to misleading with low confidence."""
     from fact_check_agent.src.config import settings
     from fact_check_agent.src.graph.nodes import synthesize_verdict
 
     state = {
         "input": make_input(),
-        "retrieved_chunks": [],
-        "entity_context": [],
+        "context_claims": [],
         "memory_results": MemoryQueryResponse(results=[], max_confidence=0.0),
     }
 
     with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_cls:
         mock_cls.return_value.chat.completions.create.return_value = make_llm_response(
-            {"verdict": "supported"}   # missing confidence_score, bias_score, etc.
+            {"reasoning": "no evidence"}  # missing degrees
         )
         updates = synthesize_verdict(state, settings)
 
     out = updates["output"]
-    assert out.verdict == "supported"
-    assert out.confidence_score == 0      # default
-    assert out.bias_score == 0.5          # default
-    assert out.evidence_links == []       # default
+    assert out.verdict == "misleading"   # no evidence → misleading
+    assert out.evidence_links == []
 
 
 def test_synthesize_verdict_fallback_on_invalid_json():
-    """LLM returning non-JSON must not crash — must return misleading with confidence=0."""
+    """LLM returning non-JSON must not crash — must return misleading (no evidence = neutral)."""
     from fact_check_agent.src.config import settings
     from fact_check_agent.src.graph.nodes import synthesize_verdict
 
     state = {
         "input": make_input(),
-        "retrieved_chunks": [],
-        "entity_context": [],
+        "context_claims": [],
         "memory_results": MemoryQueryResponse(results=[], max_confidence=0.0),
     }
 
@@ -316,8 +292,9 @@ def test_synthesize_verdict_fallback_on_invalid_json():
         updates = synthesize_verdict(state, settings)
 
     out = updates["output"]
-    assert out.verdict == "misleading"   # safe default
-    assert out.confidence_score == 0
+    assert out.verdict == "misleading"   # no evidence → misleading
+    # With no evidence/context claims, formula returns confidence=50 (neutral)
+    assert out.confidence_score == 50
 
 
 # ── write_memory: field mapping (T2) ─────────────────────────────────────────
@@ -333,7 +310,6 @@ def test_write_memory_confidence_stored_as_float_fraction():
         confidence_score=72,
         evidence_links=["https://reuters.com/1"],
         reasoning="Evidence contradicts claim.",
-        bias_score=0.3,
         cross_modal_flag=False,
     )
     state = {
@@ -368,7 +344,6 @@ def test_write_memory_image_mismatch_maps_from_cross_modal_flag():
         confidence_score=60,
         evidence_links=[],
         reasoning="Claim is misleading.",
-        bias_score=0.5,
         cross_modal_flag=True,
         cross_modal_explanation="Image shows flood, claim says drought.",
     )
@@ -399,7 +374,6 @@ def test_write_memory_evidence_summary_format():
         confidence_score=85,
         evidence_links=["https://bbc.co.uk/1", "https://reuters.com/2"],
         reasoning="Strong peer-reviewed evidence supports the claim.",
-        bias_score=0.1,
     )
     state = {"input": make_input(), "output": output}
     captured = {}
