@@ -143,11 +143,37 @@ class VectorStore:
                 "bias_score": bias_score,
                 "image_mismatch": image_mismatch,
                 "verified_at": verified_at,
+                "status": "active",
+            }],
+        )
+
+    def supersede_verdict(self, old_verdict_id: str, new_verdict_id: str) -> None:
+        """Mark an existing verdict as superseded by a newer one.
+
+        Only the listed metadata keys are modified; existing fields (label,
+        confidence, etc.) survive. Idempotent — calling twice with the same
+        old/new pair leaves the same end state.
+        """
+        self._verdicts.update(
+            ids=[old_verdict_id],
+            metadatas=[{
+                "status": "superseded",
+                "superseded_by": new_verdict_id,
             }],
         )
 
     def get_verdict_by_claim(self, claim_id: str) -> dict:
-        return self._verdicts.get(where={"claim_id": claim_id})
+        # Filter out superseded verdicts. The `$ne: "superseded"` clause matches
+        # both rows that explicitly say active and legacy rows written before
+        # the status field existed (where the field is absent).
+        return self._verdicts.get(
+            where={
+                "$and": [
+                    {"claim_id": claim_id},
+                    {"status": {"$ne": "superseded"}},
+                ]
+            }
+        )
 
     # ── Image Captions ──────────────────────────────────────────────────
 
