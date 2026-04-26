@@ -1,6 +1,7 @@
 """Initialize Neo4j schema (constraints + indexes). Idempotent — safe to run multiple times."""
 
 import sys
+
 sys.path.insert(0, ".")
 
 from src.config import settings

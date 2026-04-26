@@ -21,7 +21,6 @@ from src.memory.embeddings import EmbeddingHelper
 from src.memory.entity_merger import EntityMerger
 from src.memory.graph_store import GraphStore
 from src.memory.vector_store import VectorStore
-from src.models.caption import ImageCaption
 from src.models.credibility import CredibilitySnapshot, Prediction
 from src.models.pipeline import PreprocessingOutput
 from src.models.verdict import Verdict

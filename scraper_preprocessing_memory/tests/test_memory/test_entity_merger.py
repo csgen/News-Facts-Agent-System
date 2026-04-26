@@ -13,9 +13,7 @@ import math
 from unittest.mock import MagicMock
 
 import numpy as np
-
 from src.memory.entity_merger import EntityMerger, UnionFind
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Test helpers
