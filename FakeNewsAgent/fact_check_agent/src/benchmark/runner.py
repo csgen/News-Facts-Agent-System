@@ -295,7 +295,7 @@ def print_metrics(metrics: dict, settings_snapshot: dict) -> None:
     print()
     print("  Confusion matrix (rows=true, cols=pred):")
     labels = list(metrics["confusion_matrix"].keys())
-    header = f"  {'':18} " + " ".join(f"{l[:7]:>9}" for l in labels)
+    header = f"  {'':18} " + " ".join(f"{i[:7]:>9}" for i in labels)
     print(header)
     for true_label, row in metrics["confusion_matrix"].items():
         vals = " ".join(f"{row[p]:>9}" for p in labels)

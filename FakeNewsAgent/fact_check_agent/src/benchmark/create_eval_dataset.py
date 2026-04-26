@@ -189,7 +189,7 @@ def extract_topics(claims: list[str], model: str, workers: int) -> dict[str, lis
 def normalize_vocabulary(raw_tags: set[str], model: str) -> dict[str, str]:
     """Ask LLM to merge synonymous topic tags. Returns {raw: canonical}."""
     print(f"\nNormalizing vocabulary ({len(raw_tags)} unique raw tags)...")
-    tags_str = json.dumps(sorted(raw_tags), indent=2)
+
     client = _ollama_client()
 
     # Split into chunks if too many tags

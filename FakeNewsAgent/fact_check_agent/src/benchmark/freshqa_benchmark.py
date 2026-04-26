@@ -400,8 +400,8 @@ def print_report(results: pd.DataFrame, model: str = "") -> None:
         expected  = EXPECTED_REVALIDATE.get(cat, "?")
         acc       = correct / total if total > 0 else 0.0
 
-        actual_true  = int((sub["actual_revalidate"] == True).sum())
-        actual_false = int((sub["actual_revalidate"] == False).sum())
+        actual_true  = int((sub["actual_revalidate"] == True).sum())    # noqa: E712
+        actual_false = int((sub["actual_revalidate"] == False).sum())   # noqa: E712
         errors       = int(sub["error"].notna().sum())
 
         overall_correct += correct
@@ -411,7 +411,7 @@ def print_report(results: pd.DataFrame, model: str = "") -> None:
         print(f"  Accuracy : {correct}/{total} = {acc:.1%}  "
               f"(True:{actual_true}  False:{actual_false}  err:{errors})")
 
-        failures = sub[(sub["correct"] == False) & sub["error"].isna()]
+        failures = sub[(sub["correct"] == False) & sub["error"].isna()]   # noqa: E712
         if not failures.empty:
             print(f"  Failures ({len(failures)} total, showing up to 3):")
             for _, r in failures.head(3).iterrows():
