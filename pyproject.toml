@@ -1,0 +1,39 @@
+# Top-level project metadata + tool configs for the integrated monorepo.
+# We don't use this file as a build spec (no pip install . — Docker installs
+# from requirements.txt). It exists to host tool config (ruff, etc.) in the
+# place tooling expects to find it.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+# Per-folder excludes:
+#   data/, docker/data/  — runtime artefacts
+#   __pycache__/         — compiled bytecode
+#   notebooks/           — exploratory, not held to lint
+#   tests/               — relax the strict rules; tests have looser style
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "data",
+    "docker/data",
+    "notebooks",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+# Pragmatic ruleset: catch real bugs (F: pyflakes, E: pycodestyle errors)
+# + import hygiene (I), but avoid noisy stylistic rules.
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # line too long — line-length already enforced separately; many docstrings exceed
+    "E402",  # module-level import not at top — needed by sys.path manipulation in adapters/_bootstrap
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["F401", "F811"]   # tests can shadow / import-for-side-effects
+"**/__init__.py" = ["F401"]        # re-exports are intentional

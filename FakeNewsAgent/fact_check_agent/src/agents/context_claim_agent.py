@@ -160,7 +160,7 @@ def run(
     tavily_api_key: str,
 ) -> list[dict]:
     """Run the context claim agent. Returns a list of context_claim dicts."""
-    from fact_check_agent.src.tools.live_search_tool import format_search_context, search_live
+    from fact_check_agent.src.tools.live_search_tool import search_live
 
     model  = _llm_factory.llm_model_name()
     client = _llm_factory.make_llm_client()

@@ -15,7 +15,6 @@ from fact_check_agent.src.prompts import (
     VERDICT_SYNTHESIS_PROMPT,
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def placeholders(template: str) -> set[str]:

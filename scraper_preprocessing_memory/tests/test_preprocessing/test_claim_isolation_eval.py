@@ -23,7 +23,6 @@ from datetime import datetime, timezone
 import pytest
 from langfuse import Langfuse
 from openai import OpenAI
-
 from src.config import settings
 
 DATASET_NAME = "CLAIM_ISOLATION"

@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
-
 from src.models.article import Article, Source
 from src.models.claim import Claim, MentionSentiment
 from src.models.credibility import CredibilitySnapshot, Prediction

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 @lru_cache(maxsize=1)
 def _load_siglip(model_name: str):
     """Load SigLIP model and processor once, cache for reuse."""
-    from transformers import AutoProcessor, AutoModel
+    from transformers import AutoModel, AutoProcessor
     logger.info("Loading SigLIP model: %s", model_name)
     processor = AutoProcessor.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)

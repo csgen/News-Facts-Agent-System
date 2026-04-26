@@ -125,8 +125,10 @@ def generate_captions_for_df(df: pd.DataFrame, vlm_model: str, ollama_base_url: 
     Returns a dict mapping image_url → caption. Results are cached to disk so
     subsequent runs are instant. Skips URLs that fail (403, timeout, etc.).
     """
+    import base64
+    import urllib.request
+
     from openai import OpenAI
-    import base64, urllib.request
 
     cache = _load_caption_cache()
     client = OpenAI(base_url=ollama_base_url, api_key="ollama")
@@ -183,8 +185,8 @@ def build_fact_check_input(row: pd.Series, include_image: bool = True,
     Option A: inject document text as prefetched_chunks → skips live_search.
     image_url is populated from claim_image when present and include_image=True.
     """
-    from fact_check_agent.src.models.schemas import FactCheckInput
     from fact_check_agent.src.id_utils import make_id
+    from fact_check_agent.src.models.schemas import FactCheckInput
 
     row_idx = str(row.get("Unnamed: 0", row.name))
     claim_text = str(row["claim"]).strip()
@@ -293,7 +295,7 @@ def print_metrics(metrics: dict, settings_snapshot: dict) -> None:
     print()
     print("  Confusion matrix (rows=true, cols=pred):")
     labels = list(metrics["confusion_matrix"].keys())
-    header = f"  {'':18} " + " ".join(f"{l[:7]:>9}" for l in labels)
+    header = f"  {'':18} " + " ".join(f"{i[:7]:>9}" for i in labels)
     print(header)
     for true_label, row in metrics["confusion_matrix"].items():
         vals = " ".join(f"{row[p]:>9}" for p in labels)

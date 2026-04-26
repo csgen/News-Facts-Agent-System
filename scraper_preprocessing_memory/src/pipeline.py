@@ -1,7 +1,6 @@
 """End-to-end pipeline: Scraper → Preprocessing → Memory Agent."""
 
 import logging
-import sys
 
 from src.config import settings
 from src.memory.agent import MemoryAgent

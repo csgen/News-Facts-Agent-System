@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 from fact_check_agent.src.graph.graph import build_graph
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def make_fact_check_input(claim_text="Test claim about vaccines.", image_caption=None):
@@ -343,7 +342,7 @@ def test_reflection_agent_add_credibility_point_called():
         mock_llm.return_value.chat.completions.create.side_effect = [verdict, xmodal]
 
         graph = build_graph(memory)
-        state = graph.invoke({"input": make_fact_check_input()})
+        _ = graph.invoke({"input": make_fact_check_input()})
 
     memory.add_source_credibility_point.assert_called_once()
     call_kwargs = memory.add_source_credibility_point.call_args[1]

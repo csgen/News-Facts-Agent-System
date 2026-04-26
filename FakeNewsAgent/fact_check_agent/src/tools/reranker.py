@@ -9,7 +9,6 @@ Two-stage pipeline:
 """
 import logging
 from functools import lru_cache
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +103,7 @@ def rerank_candidates(
     Returns:
         Deduplicated, reranked list of claim dicts.
     """
-    lists_to_merge = [l for l in [vector_results, graph_results] if l]
+    lists_to_merge = [i for i in [vector_results, graph_results] if i]
 
     if not lists_to_merge:
         return []

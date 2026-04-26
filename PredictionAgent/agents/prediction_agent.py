@@ -24,10 +24,11 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from agents.memory_agent import MemoryAgent, get_memory
 from config import settings
 from id_utils import make_id
 from models.credibility import Prediction
+
+from agents.memory_agent import MemoryAgent, get_memory
 
 logger = logging.getLogger(__name__)
 
