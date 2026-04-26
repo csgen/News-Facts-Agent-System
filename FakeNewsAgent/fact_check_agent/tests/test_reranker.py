@@ -17,7 +17,6 @@ from fact_check_agent.src.tools.reranker import (
     rerank_candidates,
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def make_claim(claim_id, claim_text="test claim", verdict_label="supported",

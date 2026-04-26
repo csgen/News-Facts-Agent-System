@@ -31,10 +31,11 @@ for _p in (str(_SCAPPER), str(_SCAPPER / "src"), str(_REPO_ROOT / "FakeNewsAgent
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from agents.memory_agent import get_memory
+from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
 from src.id_utils import make_id
 from src.models.pipeline import PreprocessingOutput
-from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
+
+from agents.memory_agent import get_memory
 
 logger = logging.getLogger(__name__)
 

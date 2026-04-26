@@ -12,11 +12,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fact_check_agent.src.tools.cross_modal_tool import (
-    check_cross_modal,
     _siglip_check,
     _vision_check,
+    check_cross_modal,
 )
-
 
 # ── Shared test image factory ─────────────────────────────────────────────────
 

@@ -8,7 +8,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-
 # ── Shared entity reference ───────────────────────────────────────────────────
 
 class EntityRef(BaseModel):

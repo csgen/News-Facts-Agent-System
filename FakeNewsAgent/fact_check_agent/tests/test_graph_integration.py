@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 from fact_check_agent.src.graph.graph import build_graph
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def make_fact_check_input(claim_text="Test claim about vaccines.", image_caption=None):

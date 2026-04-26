@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -153,7 +152,7 @@ def classify_all(claims: list[str], model: str, workers: int) -> dict[str, str]:
 
     with CACHE_PATH.open("w") as f:
         json.dump(cache, f)
-    print(f"  Classification complete — cache saved")
+    print("  Classification complete — cache saved")
     return cache
 
 
@@ -211,11 +210,11 @@ def main() -> None:
 
     print(f"\n{'='*55}")
     print(f"Saved {len(out)} rows → {out_path}")
-    print(f"\nFinal topic distribution:")
+    print("\nFinal topic distribution:")
     for topic, count in out["topic"].value_counts().items():
         print(f"  {topic:15s}: {count}")
     if "verdict_label" in out.columns:
-        print(f"\nVerdict distribution:")
+        print("\nVerdict distribution:")
         for v, c in out["verdict_label"].value_counts().items():
             print(f"  {v:20s}: {c}")
 

@@ -203,8 +203,8 @@ def _run_one(
     model: str,
 ) -> dict:
     """Run check_freshness() for one question. Returns a flat result dict."""
-    from fact_check_agent.src.tools.freshness_tool import check_freshness
     from fact_check_agent.src.config import settings
+    from fact_check_agent.src.tools.freshness_tool import check_freshness
 
     # Route to Ollama for this model regardless of what .env specifies
     settings.llm_provider      = "ollama"

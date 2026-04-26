@@ -31,10 +31,8 @@ import json
 import logging
 import os
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -386,7 +384,7 @@ def main() -> None:
     print(f"Topic vocabulary saved: {VOCAB_PATH}")
     print(f"Total rows            : {len(result)}")
     print(f"Unique canonical topics: {len(topic_freq)}")
-    print(f"\nTopic distribution (top 20):")
+    print("\nTopic distribution (top 20):")
     for item in vocab_out[:20]:
         print(f"  {item['topic']:30s}: {item['count']}")
 

@@ -13,9 +13,10 @@ Usage:
 """
 import logging
 
-from fact_check_agent.src._bootstrap import *  # noqa: F401,F403 — sets memory_agent on sys.path
-from src.memory.agent import MemoryAgent  # memory_agent
 from src.config import settings as _memory_settings  # memory_agent settings
+from src.memory.agent import MemoryAgent  # memory_agent
+
+from fact_check_agent.src._bootstrap import *  # noqa: F401,F403 — sets memory_agent on sys.path
 
 logger = logging.getLogger(__name__)
 
