@@ -385,6 +385,24 @@ class MemoryAgent:
             claim_id, claim_text, article_id, entity_dicts
         )
 
+    # ── Source Bias (Task 3) ────────────────────────────────────────────
+
+    def get_source_bias_for_entity(self, entity_name: str) -> list[dict]:
+        """Per-source claim stats for an entity — used for bias tab."""
+        return self._graph.get_source_bias_for_entity(entity_name)
+
+    def update_verdict_with_feedback(
+        self,
+        verdict_id: str,
+        correct_label: str,
+        correct_confidence: float,
+        feedback_note: str = "",
+    ) -> None:
+        """Override a verdict with human-corrected values (human-in-the-loop)."""
+        self._graph.update_verdict_with_feedback(
+            verdict_id, correct_label, correct_confidence, feedback_note
+        )
+
     # ── Reflection Agent read/write (Task 2) ───────────────────────────
 
     def add_source_credibility_point(

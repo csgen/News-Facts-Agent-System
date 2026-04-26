@@ -229,6 +229,7 @@ def get_real_verdict(query: str) -> dict:
         output = fact_check_claim(query)
 
         return {
+            "verdict_id":       output.verdict_id,
             "label":            output.verdict,
             "confidence":       output.confidence_score / 100,
             "claim_text":       query[:200],
@@ -240,11 +241,12 @@ def get_real_verdict(query: str) -> dict:
             "sources":          [{"name": url.split("/")[2] if len(url.split("/")) > 2 else url,
                                   "url": url, "credibility": 0.5}
                                  for url in (output.evidence_links or [])[:4]],
-            "charged_phrases":  [],  # TODO: integrate bias phrase detection
+            "charged_phrases":  [],
         }
     except Exception as e:
         st.error(f"Fact-Check Agent unavailable: {e}")
         return {
+            "verdict_id":       None,
             "label":            "misleading",
             "confidence":       0.0,
             "claim_text":       query[:200],
@@ -412,34 +414,60 @@ def render_credibility_chart(df: pd.DataFrame, entity_name: str):
     return fig
 
 
-def render_bias_chart(bias_score: float):
-    import random
-    categories = ["Political", "Emotional", "Framing", "Source", "Overall"]
-    scores = [
-        round(random.uniform(0.1, bias_score + 0.1), 2),
-        round(random.uniform(0.1, bias_score + 0.2), 2),
-        round(random.uniform(0.1, bias_score), 2),
-        round(random.uniform(0.05, max(0.06, bias_score - 0.05)), 2),
-        bias_score
-    ]
-    scores = [min(1.0, max(0.0, s)) for s in scores]
+def get_source_bias_data(entity_name: str) -> list[dict]:
+    """Query Neo4j for per-source claim stats for this entity."""
+    memory = _get_memory()
+    if memory is None or not entity_name:
+        return []
+    try:
+        return memory.get_source_bias_for_entity(entity_name)
+    except Exception as e:
+        print(f"[source_bias] query failed: {e}")
+        return []
 
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=scores, y=categories, orientation="h",
+
+def render_source_bias_chart(bias_rows: list[dict], overall_bias: float):
+    """Bar chart: one bar per source — height = avg confidence score (bias measure)."""
+    if not bias_rows:
+        # Fall back to overall bias score only
+        fig = go.Figure(go.Bar(
+            x=[overall_bias], y=["Overall AI Bias"], orientation="h",
+            marker=dict(color=[overall_bias],
+                        colorscale=[[0, "#10b981"], [0.5, "#f59e0b"], [1, "#ef4444"]]),
+            text=[f"{overall_bias:.0%}"], textposition="outside",
+            textfont=dict(color="#94a3b8", size=11)
+        ))
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#94a3b8", family="DM Sans"),
+            xaxis=dict(range=[0, 1.3], showgrid=False, visible=False),
+            yaxis=dict(gridcolor="#1e2535"),
+            height=120, margin=dict(l=10, r=80, t=10, b=10)
+        )
+        return fig
+
+    sources = [r["source_name"] or "Unknown" for r in bias_rows]
+    scores  = [float(r["avg_confidence"] or 0.5) for r in bias_rows]
+    counts  = [int(r["claim_count"]) for r in bias_rows]
+
+    fig = go.Figure(go.Bar(
+        x=scores, y=sources, orientation="h",
         marker=dict(color=scores,
                     colorscale=[[0, "#10b981"], [0.5, "#f59e0b"], [1, "#ef4444"]],
                     showscale=False),
-        text=[f"{s:.0%}" for s in scores],
+        text=[f"{s:.0%}  ({c} claims)" for s, c in zip(scores, counts)],
         textposition="outside",
-        textfont=dict(color="#94a3b8", size=11)
+        textfont=dict(color="#94a3b8", size=10)
     ))
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#94a3b8", family="DM Sans"),
-        xaxis=dict(range=[0, 1.3], showgrid=False, visible=False),
+        title=dict(text="Avg confidence score per source (bias measure)",
+                   font=dict(color="#64748b", size=11)),
+        xaxis=dict(range=[0, 1.5], showgrid=False, visible=False),
         yaxis=dict(gridcolor="#1e2535"),
-        height=200, margin=dict(l=10, r=60, t=10, b=10)
+        height=max(150, len(bias_rows) * 38),
+        margin=dict(l=10, r=140, t=30, b=10)
     )
     return fig
 
@@ -750,6 +778,61 @@ if run_btn and user_input.strip():
                          caption=f"VLM Caption: {result['vlm_caption']}" if result.get("vlm_caption") else None,
                          use_container_width=True)
 
+        # ── Human Feedback form (only shown when confidence is low) ──────
+        _confidence = result["confidence"]
+        _verdict_id = result.get("verdict_id")
+        if _confidence < 0.60 and _verdict_id:
+            st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+            st.markdown("""
+            <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25);
+                        border-radius:12px; padding:1rem 1.2rem; margin-top:0.5rem;">
+                <div style="font-family:'Space Mono',monospace; font-size:0.65rem;
+                            letter-spacing:0.15em; text-transform:uppercase; color:#f59e0b;
+                            margin-bottom:0.6rem;">⚠️ Low confidence — Submit Correct Verdict</div>
+                <div style="font-size:0.82rem; color:#94a3b8;">
+                    The AI is uncertain about this claim. If you know the correct verdict,
+                    submit it below to improve the system.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            with st.expander("✏️  Correct this verdict", expanded=True):
+                fb_col1, fb_col2 = st.columns([2, 3])
+                with fb_col1:
+                    fb_label = st.radio(
+                        "Correct verdict",
+                        ["supported", "misleading", "refuted"],
+                        index=["supported", "misleading", "refuted"].index(result["label"])
+                        if result["label"] in ["supported", "misleading", "refuted"] else 1,
+                        key="fb_label"
+                    )
+                    fb_conf = st.slider(
+                        "Correct confidence", 0, 100,
+                        value=int(_confidence * 100), step=5, key="fb_conf"
+                    )
+                with fb_col2:
+                    fb_note = st.text_area(
+                        "Reason / evidence (optional)",
+                        placeholder="e.g. 'Reuters reported this as confirmed on 2024-03-15'",
+                        height=100, key="fb_note"
+                    )
+
+                if st.button("✅  Submit Correction", key="fb_submit"):
+                    try:
+                        mem = _get_memory()
+                        if mem:
+                            mem.update_verdict_with_feedback(
+                                verdict_id=_verdict_id,
+                                correct_label=fb_label,
+                                correct_confidence=fb_conf / 100,
+                                feedback_note=fb_note,
+                            )
+                            st.success(f"Correction saved — verdict updated to **{fb_label.upper()}** ({fb_conf}% confidence). Thank you!")
+                        else:
+                            st.warning("Memory not available — correction not saved.")
+                    except Exception as _fbe:
+                        st.error(f"Could not save correction: {_fbe}")
+
     # ─────────────────────
     # TAB 2: BIAS
     # ─────────────────────
@@ -777,17 +860,27 @@ if run_btn and user_input.strip():
             """, unsafe_allow_html=True)
 
         with b_right:
-            st.markdown('<div class="section-header">Bias Breakdown</div>', unsafe_allow_html=True)
-            st.plotly_chart(render_bias_chart(result["bias_score"]),
-                            use_container_width=True, config={"displayModeBar": False})
-
             overall_bias = result["bias_score"]
             bias_label = "Low" if overall_bias < 0.35 else ("Moderate" if overall_bias < 0.65 else "High")
             bias_color = "#10b981" if overall_bias < 0.35 else ("#f59e0b" if overall_bias < 0.65 else "#ef4444")
+
+            # ── Source Bias from Graph DB ────────────────────────────────
+            _bias_entity = st.session_state.get("_auto_entity", "").strip()
+            _bias_rows   = get_source_bias_data(_bias_entity) if _bias_entity else []
+
+            st.markdown('<div class="section-header">Source Bias Breakdown</div>', unsafe_allow_html=True)
+            if _bias_rows:
+                st.caption(f"Per-source avg confidence score for claims about **{_bias_entity}** — higher score = more positively biased toward this entity")
+            else:
+                st.caption("Track an entity above to see per-source bias data from the Knowledge Graph")
+
+            st.plotly_chart(render_source_bias_chart(_bias_rows, overall_bias),
+                            use_container_width=True, config={"displayModeBar": False})
+
             st.markdown(f"""
             <div class="metric-box" style="margin-top:0.5rem">
                 <div class="metric-value" style="color:{bias_color};">{overall_bias:.0%}</div>
-                <div class="metric-label">Overall Bias Score — {bias_label}</div>
+                <div class="metric-label">Overall AI Bias Score — {bias_label}</div>
             </div>
             """, unsafe_allow_html=True)
 
