@@ -732,6 +732,24 @@ class GraphStore:
             )
             return [record["claim_id"] for record in result]
 
+    def get_article_url_by_id(self, article_id: str) -> Optional[str]:
+        """Return the URL stored on the Article node, or None if missing.
+
+        Used by the fact-check adapter to populate FactCheckInput.source_url
+        when reconstructing inputs from claim_ids alone.
+        """
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                MATCH (a:Article {article_id: $article_id})
+                RETURN a.url AS url
+                LIMIT 1
+                """,
+                article_id=article_id,
+            )
+            record = result.single()
+            return record["url"] if record and record["url"] else None
+
     # ── Feature: Source Bias ────────────────────────────────────────────
 
     def get_source_bias_for_entity(self, entity_name: str) -> list[dict]:

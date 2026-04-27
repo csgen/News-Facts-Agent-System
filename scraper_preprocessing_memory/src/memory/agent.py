@@ -329,6 +329,10 @@ class MemoryAgent:
     def get_caption_by_article(self, article_id: str) -> dict:
         return self._vector.get_caption_by_article(article_id)
 
+    def get_article_url_by_id(self, article_id: str) -> Optional[str]:
+        """Return the URL stored on the Article node (None if missing)."""
+        return self._graph.get_article_url_by_id(article_id)
+
     def get_verdict_by_claim(self, claim_id: str) -> dict:
         return self._vector.get_verdict_by_claim(claim_id)
 
