@@ -52,7 +52,7 @@ plotly>=5.18.0
 pandas>=2.0
 
 # ── Evaluation (Task 3) ────────────────────────────────────────────────────────
-scikit-learn>=1.4
+scikit-learn>=1.8.0
 # datasets>=2.0                # uncomment to load real LIAR/FEVER/Factify datasets
 
 # ── Dev / Testing (Task 1) ─────────────────────────────────────────────────────
