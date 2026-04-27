@@ -6,14 +6,13 @@ Nodes that need MemoryAgent receive it as a second argument via closure
 """
 import json
 import logging
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 import fact_check_agent.src.llm_factory as _llm_factory
 from fact_check_agent.src.agents import context_claim_agent
 from fact_check_agent.src.agents.reflection_agent import (
     query_source_credibility,
-    update_source_credibility,
+    record_verdict_outcome,
 )
 from fact_check_agent.src.models.schemas import (
     FactCheckOutput,
@@ -57,6 +56,41 @@ def receive_claim(state: FactCheckState) -> dict:
         "clip_similarity_score":   None,
         "output":                  None,
     }
+
+
+_TOPIC_LIST = (
+    "technology", "geopolitics", "financial", "health", "science",
+    "sports", "entertainment", "climate", "crime", "art",
+)
+
+
+def _classify_topic(claim_text: str, settings) -> str:
+    """Classify a claim into one of the standard topic categories via LLM.
+
+    Used only for the frontend path where ClaimIsolator hasn't run.
+    Falls back to 'unknown' if the LLM returns an unexpected value or fails.
+    """
+    try:
+        client = _llm_factory.make_llm_client()
+        response = client.chat.completions.create(
+            model=_llm_factory.llm_model_name(),
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Classify this claim into exactly one topic. "
+                    f"Options: {' | '.join(_TOPIC_LIST)}\n\n"
+                    f"Claim: {claim_text}\n\n"
+                    "Respond with just the single topic word."
+                ),
+            }],
+            temperature=0,
+            max_tokens=10,
+        )
+        topic = response.choices[0].message.content.strip().lower()
+        return topic if topic in _TOPIC_LIST else "unknown"
+    except Exception as exc:
+        logger.warning("_classify_topic failed: %s", exc)
+        return "unknown"
 
 
 # ── Node: query_memory ────────────────────────────────────────────────────────
@@ -117,24 +151,31 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
         default=0.0,
     )
 
+    # Resolve effective topic — use ClaimIsolator output if available, else classify
+    effective_topic = inp.topic_text.strip()
+    if not effective_topic:
+        effective_topic = _classify_topic(inp.claim_text, settings)
+
     source_cred = query_source_credibility(
         claim_text = inp.claim_text,
         source_url = inp.source_url,
         memory     = memory,
+        topic      = effective_topic,
     )
 
     logger.info(
         "query_memory: %d vector + %d graph → %d reranked, max_confidence=%.2f, "
-        "graph_rag=%s, cross_encoder=%s, source_cred_samples=%d",
+        "graph_rag=%s, cross_encoder=%s, topic=%s, source_cred_samples=%d",
         len(vector_results), len(graph_results), len(results), max_confidence,
         settings.use_graph_rag, settings.use_cross_encoder,
-        source_cred.get("sample_count", 0),
+        effective_topic, source_cred.get("sample_count", 0),
     )
 
     return {
         "memory_results":     MemoryQueryResponse(results=results, max_confidence=max_confidence),
         "entity_context":     entity_ctx,
         "source_credibility": source_cred,
+        "effective_topic":    effective_topic,
     }
 
 
@@ -185,15 +226,58 @@ def freshness_check_all(state: FactCheckState, settings) -> dict:
 
 # ── Node: context_claim_agent ─────────────────────────────────────────────────
 
-def context_claim_agent_node(state: FactCheckState, settings) -> dict:
-    """Generate factual/counter-factual questions, check coverage, search gaps, compose claims."""
+_CREDIBILITY_FILTER_THRESHOLD = 0.5   # Tavily results below this are dropped
+
+
+def context_claim_agent_node(state: FactCheckState, memory: "MemoryAgent", settings) -> dict:
+    """Generate questions, gather evidence, enrich with per-source credibility, filter low-cred."""
+    from fact_check_agent.src.agents.reflection_agent import source_id_from_url
+
     claims = context_claim_agent.run(
         claim_text        = state["input"].claim_text,
         fresh_context     = state.get("fresh_context", []),
         prefetched_chunks = state.get("retrieved_chunks", []),
         tavily_api_key    = settings.tavily_api_key,
     )
-    return {"context_claims": claims}
+
+    effective_topic = state.get("effective_topic", "") or state["input"].topic_text
+    filtered: list[dict] = []
+
+    for claim in claims:
+        if claim["source"] == "memory":
+            filtered.append(claim)
+            continue
+
+        source_url = claim.get("source_url") or ""
+        cred: float | None = None
+
+        if source_url:
+            source_id = source_id_from_url(source_url)
+            try:
+                cred = memory.get_source_topic_credibility(source_id, effective_topic)
+                if cred is None:
+                    cred = memory.get_base_credibility(source_id)
+            except Exception:
+                pass
+
+        if cred is None:
+            cred = _SOURCE_CREDIBILITY.get(claim["source"], _DEFAULT_CREDIBILITY)
+
+        if cred < _CREDIBILITY_FILTER_THRESHOLD:
+            logger.info(
+                "context_claim_agent: dropped %s result (source_url=%s, credibility=%.3f < %.2f)",
+                claim["source"], source_url, cred, _CREDIBILITY_FILTER_THRESHOLD,
+            )
+            continue
+
+        claim["credibility"] = cred
+        filtered.append(claim)
+
+    logger.info(
+        "context_claim_agent: %d/%d claims kept after credibility filter (threshold=%.2f)",
+        len(filtered), len(claims), _CREDIBILITY_FILTER_THRESHOLD,
+    )
+    return {"context_claims": filtered}
 
 
 # ── Node: synthesize_verdict ──────────────────────────────────────────────────
@@ -227,6 +311,9 @@ def _format_numbered_context_claims(context_claims: list[dict]) -> str:
 def _get_claim_credibility(claim: dict) -> float:
     if claim["source"] == "memory" and claim.get("confidence") is not None:
         return float(claim["confidence"])
+    # Tavily/prefetched claims carry a pre-computed credibility from context_claim_agent_node
+    if claim.get("credibility") is not None:
+        return float(claim["credibility"])
     return _SOURCE_CREDIBILITY.get(claim["source"], _DEFAULT_CREDIBILITY)
 
 
@@ -513,48 +600,26 @@ def cross_modal_check(state: FactCheckState, settings) -> dict:
 # ── Node: write_memory ────────────────────────────────────────────────────────
 
 def write_memory(state: FactCheckState, memory: "MemoryAgent") -> dict:
-    """Write the final verdict back to MemoryAgent (ChromaDB + Neo4j)."""
+    """Delegate all 5 post-verdict write-backs to the Reflection Agent."""
     from fact_check_agent.src.config import settings as _settings
     if _settings.dry_run or _settings.offline_mode:
         logger.info("write_memory: %s — skipping DB write",
                     "offline_mode" if _settings.offline_mode else "dry_run")
         return {}
 
-    from src.models.verdict import Verdict  # memory_agent model — path set by bootstrap
-
     output: Optional[FactCheckOutput] = state.get("output")
     if not output:
         logger.warning("write_memory called with no output — skipping")
         return {}
 
-    evidence_summary = output.reasoning
-    if output.evidence_links:
-        evidence_summary += "\n\nSources: " + " | ".join(output.evidence_links)
-
-    verdict = Verdict(
-        verdict_id      = output.verdict_id,
-        claim_id        = output.claim_id,
-        label           = output.verdict,
-        confidence      = output.confidence_score / 100,
-        evidence_summary= evidence_summary,
-        image_mismatch  = output.cross_modal_flag,
-        verified_at     = datetime.now(timezone.utc),
+    record_verdict_outcome(
+        output     = output,
+        claim_text = state["input"].claim_text,
+        source_url = state["input"].source_url,
+        topic_text = state.get("effective_topic", "") or state["input"].topic_text,
+        memory     = memory,
     )
-
-    memory.add_verdict(verdict)
-    memory.update_claim_status(output.claim_id, "verified")
     logger.info("write_memory: verdict %s written for claim %s", output.verdict, output.claim_id)
-
-    # Reflection Agent: append one (source, topic, credibility) observation
-    update_source_credibility(
-        claim_text      = state["input"].claim_text,
-        source_url      = state["input"].source_url,
-        verdict_id      = output.verdict_id,
-        verdict_label   = output.verdict,
-        confidence_score= output.confidence_score,
-        memory          = memory,
-    )
-
     return {}
 
 

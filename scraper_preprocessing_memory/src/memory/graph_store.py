@@ -31,6 +31,7 @@ class GraphStore:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (ic:ImageCaption) REQUIRE ic.caption_id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (cs:CredibilitySnapshot) REQUIRE cs.snapshot_id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Prediction) REQUIRE p.prediction_id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (t:Topic) REQUIRE t.name IS UNIQUE",
         ]
         indexes = [
             "CREATE INDEX IF NOT EXISTS FOR (c:Claim) ON (c.extracted_at)",
@@ -40,7 +41,7 @@ class GraphStore:
         with self._driver.session() as session:
             for stmt in constraints + indexes:
                 session.run(stmt)
-        logger.info("Neo4j schema initialized (8 constraints, 3 indexes)")
+        logger.info("Neo4j schema initialized (9 constraints, 3 indexes)")
 
     # ── Write: Sources ──────────────────────────────────────────────────
 
@@ -537,6 +538,73 @@ class GraphStore:
             )
             record = result.single()
             return record["base_credibility"] if record else None
+
+    def get_base_credibility(self, source_id: str) -> Optional[float]:
+        """Return the static base_credibility of a Source node, or None if unknown."""
+        with self._driver.session() as session:
+            result = session.run(
+                "MATCH (s:Source {source_id: $source_id}) RETURN s.base_credibility AS v",
+                source_id=source_id,
+            )
+            record = result.single()
+            return float(record["v"]) if record and record["v"] is not None else None
+
+    def update_claim_status(self, claim_id: str, status: str) -> None:
+        """Update the status field on an existing Claim node."""
+        with self._driver.session() as session:
+            session.run(
+                "MATCH (c:Claim {claim_id: $claim_id}) SET c.status = $status",
+                claim_id=claim_id, status=status,
+            )
+
+    def get_topic_for_verdict(self, verdict_id: str) -> str:
+        """Return the topic_text of the Claim linked to this Verdict, or '' if not found."""
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                MATCH (c:Claim)-[:VERIFIED_AS]->(v:Verdict {verdict_id: $verdict_id})
+                RETURN c.topic_text AS topic_text
+                """,
+                verdict_id=verdict_id,
+            )
+            record = result.single()
+            return (record["topic_text"] or "") if record else ""
+
+    def get_source_topic_credibility(self, source_id: str, topic: str) -> Optional[float]:
+        """Return current credibility for a (source, topic) pair, or None if no record exists."""
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                MATCH (s:Source {source_id: $source_id})-[r:HAS_CREDIBILITY]->(t:Topic {name: $topic})
+                RETURN r.credibility AS credibility
+                """,
+                source_id=source_id, topic=topic,
+            )
+            record = result.single()
+            return float(record["credibility"]) if record else None
+
+    def upsert_source_topic_credibility(
+        self, source_id: str, topic: str, credibility: float
+    ) -> None:
+        """Create or update the (Source)-[:HAS_CREDIBILITY]->(Topic) relationship.
+
+        MERGE on Source and Topic ensures new topics are created automatically.
+        The Source node is created bare if it doesn't exist yet (scraped sources
+        will already have it; unknown sources get one without base_credibility).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._driver.session() as session:
+            session.run(
+                """
+                MERGE (s:Source {source_id: $source_id})
+                MERGE (t:Topic {name: $topic})
+                MERGE (s)-[r:HAS_CREDIBILITY]->(t)
+                SET r.credibility = $credibility,
+                    r.last_updated = datetime($now)
+                """,
+                source_id=source_id, topic=topic,
+                credibility=credibility, now=now,
+            )
 
     def get_trending_entities(
         self, since: datetime, limit: int = 10

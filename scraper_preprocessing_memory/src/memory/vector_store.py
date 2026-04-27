@@ -265,7 +265,7 @@ class VectorStore:
     def get_caption_by_article(self, article_id: str) -> dict:
         return self._image_captions.get(where={"article_id": article_id})
 
-    # ── Source Credibility (for Reflection Agent) ───────────────────────
+    # ── Source Credibility (HITL write path from frontend) ──────────────
 
     def upsert_source_credibility_point(
         self,
@@ -278,7 +278,7 @@ class VectorStore:
         verdict_id: str,
         created_at: str,
     ) -> None:
-        """Append a (source, topic, credibility) observation."""
+        """Append a (source, topic, credibility) observation from HITL feedback."""
         self._source_credibility.upsert(
             ids=[point_id],
             embeddings=[embedding],
@@ -304,3 +304,4 @@ class VectorStore:
             n_results=k,
             where={"source_id": source_id},
         )
+

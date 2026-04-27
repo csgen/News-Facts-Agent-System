@@ -9,7 +9,6 @@ import hashlib
 import logging
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure the project root is on sys.path so imports like `from agents...` work
@@ -1144,29 +1143,24 @@ if _cached_result and (run_btn or not run_btn):
                                 fb_note.replace("\n", " ") if fb_note else "",
                             )
 
-                            # 2. Log a source credibility observation so the
-                            #    Reflection Agent picks up the human signal
+                            # 2. Update (source, topic) credibility via Reflection Agent
+                            #    Topic is traced from the Claim→Verdict link in Neo4j.
                             try:
-                                from id_utils import make_id
-                                _claim_text = st.session_state.get("_last_claim_text", result.get("claim_text", ""))
+                                from fact_check_agent.src.agents.reflection_agent import (
+                                    record_hitl_correction,
+                                )
                                 _sources    = result.get("sources", [])
-                                _source_id  = (
-                                    "src_" + _sources[0]["url"].split("/")[2].replace(".", "_")
-                                    if _sources else "src_frontend"
+                                _source_url = _sources[0]["url"] if _sources else ""
+                                record_hitl_correction(
+                                    verdict_id    = _verdict_id,
+                                    fb_label      = fb_label,
+                                    fb_confidence = _correct_conf,
+                                    source_url    = _source_url,
+                                    memory        = mem,
                                 )
-                                mem.add_source_credibility_point(
-                                    point_id     = make_id("scp_"),
-                                    claim_text   = _claim_text,
-                                    topic_text   = _claim_text,
-                                    source_id    = _source_id,
-                                    credibility  = _correct_conf,
-                                    verdict_label= fb_label,
-                                    verdict_id   = _verdict_id,
-                                    created_at   = datetime.now(timezone.utc).isoformat(),
-                                )
-                                print(f"[hitl] source credibility point written → source={_source_id}  cred={_correct_conf:.2f}  label={fb_label}")
+                                print(f"[hitl] credibility updated → {_source_url}  cred={_correct_conf:.2f}  label={fb_label}")
                             except Exception as _sce:
-                                print(f"[hitl] source credibility update skipped: {_sce}")
+                                print(f"[hitl] credibility update skipped: {_sce}")
 
                             # 3. Update cached result so verdict card reflects correction immediately
                             if "_last_result" in st.session_state:

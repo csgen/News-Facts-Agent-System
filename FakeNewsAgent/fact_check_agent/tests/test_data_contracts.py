@@ -297,10 +297,13 @@ def test_synthesize_verdict_fallback_on_invalid_json():
     assert out.confidence_score == 50
 
 
-# ── write_memory: field mapping (T2) ─────────────────────────────────────────
+# ── write_memory: delegates to record_verdict_outcome (T2) ───────────────────
+# Field mapping (confidence scale, image_mismatch, evidence_summary format) is
+# now tested in test_reflection_agent.py via record_verdict_outcome directly.
+# Here we only verify that write_memory passes the correct arguments through.
 
-def test_write_memory_confidence_stored_as_float_fraction():
-    """confidence_score=72 (int 0-100) must be stored as 0.72 (float 0-1) in Verdict."""
+def test_write_memory_calls_record_verdict_outcome_with_output():
+    """write_memory must call record_verdict_outcome with the FactCheckOutput."""
     from fact_check_agent.src.graph.nodes import write_memory
 
     output = FactCheckOutput(
@@ -312,87 +315,48 @@ def test_write_memory_confidence_stored_as_float_fraction():
         reasoning="Evidence contradicts claim.",
         cross_modal_flag=False,
     )
-    state = {
-        "input": make_input(),
-        "output": output,
-    }
-
-    captured = {}
-
-    def fake_add_verdict(verdict):
-        captured["verdict"] = verdict
-
-    memory = MagicMock()
-    memory.add_verdict.side_effect = fake_add_verdict
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
-
-    with patch("fact_check_agent.src.graph.nodes.update_source_credibility"):
-        write_memory(state, memory)
-
-    v = captured["verdict"]
-    assert abs(v.confidence - 0.72) < 1e-9, f"Expected 0.72, got {v.confidence}"
-
-
-def test_write_memory_image_mismatch_maps_from_cross_modal_flag():
-    """image_mismatch on Verdict must equal output.cross_modal_flag."""
-    from fact_check_agent.src.graph.nodes import write_memory
-
-    output = FactCheckOutput(
-        verdict_id="vrd_xm",
-        claim_id="clm_xm",
-        verdict="misleading",
-        confidence_score=60,
-        evidence_links=[],
-        reasoning="Claim is misleading.",
-        cross_modal_flag=True,
-        cross_modal_explanation="Image shows flood, claim says drought.",
-    )
     state = {"input": make_input(), "output": output}
-    captured = {}
-
-    def fake_add_verdict(verdict):
-        captured["verdict"] = verdict
-
     memory = MagicMock()
-    memory.add_verdict.side_effect = fake_add_verdict
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
 
-    with patch("fact_check_agent.src.graph.nodes.update_source_credibility"):
+    with patch("fact_check_agent.src.graph.nodes.record_verdict_outcome") as mock_rvo:
         write_memory(state, memory)
 
-    assert captured["verdict"].image_mismatch is True
+    mock_rvo.assert_called_once()
+    call_kwargs = mock_rvo.call_args.kwargs
+    assert call_kwargs["output"] is output
+    assert call_kwargs["memory"] is memory
 
 
-def test_write_memory_evidence_summary_format():
-    """evidence_summary = reasoning + '\\n\\nSources: ' + ' | '.join(links)."""
+def test_write_memory_passes_source_url():
+    """write_memory must pass the correct source_url from state input."""
     from fact_check_agent.src.graph.nodes import write_memory
 
     output = FactCheckOutput(
-        verdict_id="vrd_es",
-        claim_id="clm_es",
+        verdict_id="vrd_su",
+        claim_id="clm_su",
         verdict="supported",
-        confidence_score=85,
-        evidence_links=["https://bbc.co.uk/1", "https://reuters.com/2"],
-        reasoning="Strong peer-reviewed evidence supports the claim.",
+        confidence_score=80,
+        evidence_links=[],
+        reasoning="Supported.",
     )
     state = {"input": make_input(), "output": output}
-    captured = {}
-
-    def fake_add_verdict(verdict):
-        captured["verdict"] = verdict
-
     memory = MagicMock()
-    memory.add_verdict.side_effect = fake_add_verdict
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
 
-    with patch("fact_check_agent.src.graph.nodes.update_source_credibility"):
+    with patch("fact_check_agent.src.graph.nodes.record_verdict_outcome") as mock_rvo:
         write_memory(state, memory)
 
-    es = captured["verdict"].evidence_summary
-    assert "Strong peer-reviewed evidence supports the claim." in es
-    assert "https://bbc.co.uk/1" in es
-    assert "https://reuters.com/2" in es
-    assert es == (
-        "Strong peer-reviewed evidence supports the claim."
-        "\n\nSources: https://bbc.co.uk/1 | https://reuters.com/2"
-    )
+    call_kwargs = mock_rvo.call_args.kwargs
+    assert call_kwargs["source_url"] == "https://example.com/article/1"
+
+
+def test_write_memory_skipped_when_no_output():
+    """write_memory must not call record_verdict_outcome when output is missing."""
+    from fact_check_agent.src.graph.nodes import write_memory
+
+    state = {"input": make_input(), "output": None}
+    memory = MagicMock()
+
+    with patch("fact_check_agent.src.graph.nodes.record_verdict_outcome") as mock_rvo:
+        write_memory(state, memory)
+
+    mock_rvo.assert_not_called()

@@ -37,6 +37,7 @@ def make_fact_check_input(claim_text="Test claim about vaccines.", image_caption
         article_id="art_test001",
         image_caption=image_caption,
         timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        topic_text="health",  # skip _classify_topic LLM call in query_memory
     )
 
 
@@ -53,8 +54,9 @@ def make_memory_mock(max_confidence=0.0):
     memory.get_entity_ids_for_claims.return_value = []
     memory.get_graph_claims_for_entities.return_value = []
     memory.add_verdict.return_value = None
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
-    memory.add_source_credibility_point.return_value = None
+    memory.get_source_topic_credibility.return_value = None
+    memory.get_base_credibility.return_value = None
+    memory.upsert_source_topic_credibility.return_value = None
     return memory
 
 
@@ -227,8 +229,9 @@ def make_cache_hit_memory_mock(confidence=0.92, days_old=2):
                        "verified_at": verified_at.isoformat()}]
     }
     memory.add_verdict.return_value = None
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
-    memory.add_source_credibility_point.return_value = None
+    memory.get_source_topic_credibility.return_value = None
+    memory.get_base_credibility.return_value = None
+    memory.upsert_source_topic_credibility.return_value = None
     return memory
 
 
@@ -306,8 +309,8 @@ def test_reflection_agent_source_credibility_populated():
     assert "sample_count" in sc
 
 
-def test_reflection_agent_add_credibility_point_called():
-    """add_source_credibility_point called once with correct source_id and point_id prefix."""
+def test_reflection_agent_upserts_source_topic_credibility():
+    """upsert_source_topic_credibility called once with correct source_id after verdict."""
     memory = make_memory_mock()
 
     with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
@@ -318,10 +321,10 @@ def test_reflection_agent_add_credibility_point_called():
         graph = build_graph(memory)
         _ = graph.invoke({"input": make_fact_check_input()})
 
-    memory.add_source_credibility_point.assert_called_once()
-    call_kwargs = memory.add_source_credibility_point.call_args[1]
+    memory.upsert_source_topic_credibility.assert_called_once()
+    call_args = memory.upsert_source_topic_credibility.call_args[0]
 
     # source_id must be derived from "https://example.com/article"
-    assert call_kwargs["source_id"] == "src_example_com"
-    # point_id must be prefixed with "sc_" + verdict_id
-    assert call_kwargs["point_id"].startswith("sc_vrd_")
+    assert call_args[0] == "src_example_com"
+    # credibility must be in valid range
+    assert 0.0 <= call_args[2] <= 1.0
