@@ -22,7 +22,7 @@ neo4j>=5.0,<6.0
 chromadb>=1.0.0,<2.0
 
 # ── Observability (optional — falls back to openai if not installed) ────────────
-langfuse>=2.0,<3.0
+langfuse>=4.5.1,<5.0
 
 # ── Live Search ────────────────────────────────────────────────────────────────
 tavily-python>=0.3

@@ -28,7 +28,7 @@ rapidfuzz>=3.0,<4.0
 numpy>=1.24,<3.0
 
 # ── Observability (optional — auto-disabled if LANGFUSE_* env vars unset) ──
-langfuse>=2.0,<3.0
+langfuse>=4.5.1,<5.0
 
 # ── Live Search ─────────────────────────────────────────────────────────────
 tavily-python>=0.3
