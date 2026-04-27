@@ -189,6 +189,7 @@ def layer_b_check(text: str) -> dict:
     """LLM-based classification. Only called if Layer A passes."""
     try:
         import os
+
         from openai import OpenAI
 
         # Try loading .env from the PredictionAgent root

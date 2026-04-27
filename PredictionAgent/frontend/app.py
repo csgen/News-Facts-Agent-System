@@ -7,6 +7,7 @@ Run with: streamlit run frontend/app.py
 
 import os
 import sys
+from datetime import datetime, timezone
 
 # Ensure the project root is on sys.path so imports like `from agents...` work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -441,7 +442,7 @@ def get_real_entity_history(entity_name: str) -> pd.DataFrame:
         entity_dict = memory.get_entity_by_name(entity_name)
         print(f"[get_entity_history] get_entity_by_name result: {entity_dict}")
         if entity_dict is None:
-            print(f"[get_entity_history] entity NOT found in Neo4j")
+            print("[get_entity_history] entity NOT found in Neo4j")
             df = _empty_entity_df()
             df.attrs["entity_found"] = False
             df.attrs["snapshot_count"] = 0
@@ -451,7 +452,7 @@ def get_real_entity_history(entity_name: str) -> pd.DataFrame:
         snapshots = memory.get_entity_snapshots(entity_dict["entity_id"], limit=60)
         print(f"[get_entity_history] snapshots returned: {len(snapshots)}")
         if not snapshots:
-            print(f"[get_entity_history] entity exists but has 0 snapshots")
+            print("[get_entity_history] entity exists but has 0 snapshots")
             # Return empty df with a sentinel so Tab 3 can show a specific message
             df = _empty_entity_df()
             df.attrs["entity_found"] = True
