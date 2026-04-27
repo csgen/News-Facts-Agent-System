@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload coverage report (artifact, 14-day retention)
         if: always()    # upload even if tests failed, so we can inspect why
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage.xml
