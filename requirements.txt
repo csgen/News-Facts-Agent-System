@@ -41,7 +41,7 @@ apscheduler>=3.10,<4.0
 lxml_html_clean>=0.1.0
 
 # ── NLP / Preprocessing (spaCy model downloaded in Dockerfile) ─────────────
-spacy>=3.7,<4.0
+spacy>=3.8.14,<4.0
 
 # ── Cross-modal vision (FakeNewsAgent optional SigLIP / CLIP path) ─────────
 transformers>=4.40
