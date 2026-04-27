@@ -223,7 +223,6 @@ class GraphStore:
                     v.label            = $label,
                     v.confidence       = $confidence,
                     v.evidence_summary = $evidence_summary,
-                    v.bias_score       = 0.5,
                     v.image_mismatch   = $image_mismatch,
                     v.verified_at      = datetime($verified_at)
                 ON MATCH SET
