@@ -35,7 +35,7 @@ jobs:
 
       - name: Build changelog from commits
         id: changelog
-        uses: mikepenz/release-changelog-builder-action@v4
+        uses: mikepenz/release-changelog-builder-action@v6
         with:
           # Group commits by conventional-commit prefix (feat, fix, etc.).
           # If you don't follow conventional commits, this still produces a
