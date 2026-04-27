@@ -373,3 +373,67 @@ From the GitHub UI: **Actions** tab → pick a workflow → **Run workflow**. Us
 
 - To throttle: edit the cron in `.github/workflows/scrape.yml`, or lower `max_per_source` in `src/pipeline.py`'s `ScraperAgent.scrape(...)` call.
 - The 30-minute `timeout-minutes` cap stops a hung run from racking up runner-minutes.
+
+### `release-image.yml` — Docker image to GHCR
+
+Every push to `main` (and every tag push) builds the Docker image and publishes it to GitHub Container Registry. Anyone with read access to the repo can then `docker pull` and run the system:
+
+```bash
+docker pull ghcr.io/<owner>/news_facts_system:latest
+docker run --rm --env-file .env ghcr.io/<owner>/news_facts_system:latest \
+  python -c "import src.config; print('ok')"
+```
+
+Tag scheme:
+- `:latest` — most recent push to `main`
+- `:sha-<short>` — every commit, regardless of branch
+- `:vX.Y.Z` — published when you push a `v*.*.*` git tag
+
+The workflow uses GitHub Actions cache (`type=gha`) for the `pip install` layer, so first build is ~5–10 min, subsequent builds with no `requirements.txt` change drop to ~1–2 min. No secrets needed — auth uses the auto-provided `GITHUB_TOKEN`.
+
+### `release.yml` — Auto-generated GitHub Releases
+
+When you push a tag matching `v*.*.*`, this workflow runs in parallel with `release-image.yml`:
+- Pulls the full git history
+- Generates a changelog from commits since the previous tag (grouped by `feat:` / `fix:` / `ci:` / `docs:` prefixes)
+- Creates a GitHub Release with the changelog as the body, named after the tag
+
+Cutting a release:
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+After ~2 minutes you'll have:
+- `ghcr.io/<owner>/news_facts_system:v0.1.0` (image)
+- A new entry on the repo's **Releases** page with auto-generated notes
+
+If you tag with a hyphen (e.g. `v0.2.0-rc1`), the Release is automatically marked as a pre-release.
+
+### `dependabot.yml` — Automated dependency PRs
+
+Three ecosystems are watched weekly:
+- **`pip`** — Python packages in `requirements.txt`. Patch + minor bumps only; majors are ignored (too risky to auto-propose).
+- **`github-actions`** — `uses:` version pins in workflow files. Near-zero risk; safe to merge after CI passes.
+- **`docker`** — base image digest in `docker/Dockerfile`. Triggers when Docker Hub republishes `python:3.12-slim` (Python point releases, security patches).
+
+Each PR is labeled `dependencies` + an ecosystem-specific tag (`python`, `github-actions`, `docker`). CI runs automatically; merge after green. No PR is auto-merged — review the changelog link before clicking Merge.
+
+To check Dependabot's last scan or trigger an early scan: **Insights → Dependency Graph → Dependabot** in the repo UI.
+
+### Reproducible builds (digest-pinned base image)
+
+The `docker/Dockerfile` first line pins to a specific `sha256:…` digest:
+
+```dockerfile
+FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
+```
+
+This means every build (today, in 6 months, on a fresh machine) starts from byte-identical bits — no surprise OS patches, no surprise Python point upgrades. Dependabot's `docker` ecosystem opens PRs to bump the digest when the upstream tag moves.
+
+To bump manually:
+```bash
+docker pull python:3.12-slim
+docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
+# paste the new digest into Dockerfile line 1
+```
