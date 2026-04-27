@@ -1,0 +1,58 @@
+# Dependabot opens automated PRs when our dependencies have updates.
+# Each PR triggers the existing CI workflow; merge after green.
+#
+# Three ecosystems are tracked:
+#   pip            — Python packages in the merged top-level requirements.txt
+#   github-actions — `uses:` versions in .github/workflows/*.yml
+#   docker         — base image digest in docker/Dockerfile
+#
+# Major-version bumps are ignored by default (those frequently break things).
+# We accept patch + minor automatically — review before merging.
+
+version: 2
+updates:
+
+  # ── Python (top-level merged requirements) ────────────────────────────────
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+    # Don't propose major version bumps automatically — those need human
+    # judgment (e.g. chromadb 1.x → 2.x will likely break the schema).
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ── GitHub Actions (workflow `uses:` pins) ────────────────────────────────
+  # Near-zero risk — these run only inside CI runners.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+
+  # ── Docker base image (pinned digest in docker/Dockerfile) ────────────────
+  # Useful only because the Dockerfile pins to a sha256 digest. With a
+  # floating tag like `:3.12-slim` Dependabot would have nothing to track.
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker)"
