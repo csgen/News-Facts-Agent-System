@@ -9,10 +9,9 @@ Tests for:
 
 import hashlib
 import logging
-import sys
 import os
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
