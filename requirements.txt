@@ -50,7 +50,7 @@ Pillow>=10.0
 sentencepiece>=0.1.99
 
 # ── Frontend (PredictionAgent Streamlit UI) ────────────────────────────────
-streamlit>=1.32.0
+streamlit>=1.56.0
 plotly>=5.18.0
 pandas>=2.0
 
