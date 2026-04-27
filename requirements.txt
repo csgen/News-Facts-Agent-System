@@ -45,7 +45,7 @@ spacy>=3.7,<4.0
 
 # ── Cross-modal vision (FakeNewsAgent optional SigLIP / CLIP path) ─────────
 transformers>=4.40
-torch>=2.2
+torch>=2.11.0
 Pillow>=10.0
 sentencepiece>=0.1.99
 

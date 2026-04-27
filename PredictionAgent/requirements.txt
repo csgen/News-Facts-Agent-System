@@ -40,7 +40,7 @@ spacy>=3.7,<4.0
 
 # ── Cross-modal / Vision (Task 2 SOTA — optional) ──────────────────────────────
 transformers>=4.40
-torch>=2.2
+torch>=2.11.0
 Pillow>=10.0
 
 # ── Reranking (Task 2 — optional) ──────────────────────────────────────────────
