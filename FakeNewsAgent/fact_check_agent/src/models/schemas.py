@@ -43,6 +43,7 @@ class FactCheckInput(BaseModel):
     image_url: Optional[str] = None       # raw image URL or base64 data URI; used by cross-modal check
     timestamp: datetime
     prefetched_chunks: list[str] = Field(default_factory=list)  # pre-fetched evidence; skips live_search when non-empty
+    topic_text: str = ""   # coarse topic from ClaimIsolator; empty string for frontend/benchmark paths
 
 
 # ── Output contract: Fact-Check Agent → Frontend / Memory ────────────────────

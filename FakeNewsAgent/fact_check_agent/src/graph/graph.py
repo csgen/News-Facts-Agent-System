@@ -83,7 +83,7 @@ def build_graph(memory: "MemoryAgent"):
     # Bind memory and settings into nodes, then wrap with timing logger
     _query_memory            = _timed("query_memory",            lambda s: query_memory(s, memory, settings))
     _freshness_check_all     = _timed("freshness_check_all",     lambda s: freshness_check_all(s, settings))
-    _context_claim_agent     = _timed("context_claim_agent",     lambda s: context_claim_agent_node(s, settings))
+    _context_claim_agent     = _timed("context_claim_agent",     lambda s: context_claim_agent_node(s, memory, settings))
     _synthesize_verdict      = _timed("synthesize_verdict",      lambda s: synthesize_verdict(s, settings))
     _multi_agent_debate      = _timed("multi_agent_debate",      lambda s: multi_agent_debate(s, settings))
     _cross_modal_check       = _timed("cross_modal_check",       lambda s: cross_modal_check(s, settings))

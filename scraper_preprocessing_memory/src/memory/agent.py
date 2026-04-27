@@ -298,8 +298,9 @@ class MemoryAgent:
     # ── Query Methods ───────────────────────────────────────────────────
 
     def update_claim_status(self, claim_id: str, status: str) -> None:
-        """Update the status of an existing claim (e.g. 'pending' → 'verified')."""
+        """Update claim status in both ChromaDB and Neo4j."""
         self._vector.update_claim_status(claim_id, status)
+        self._graph.update_claim_status(claim_id, status)
 
     def search_similar_claims(
         self, text: str, top_k: int = 5
@@ -535,7 +536,25 @@ class MemoryAgent:
             logger.warning("Human verdict lookup failed: %s", e)
             return None
 
-    # ── Reflection Agent read/write (Task 2) ───────────────────────────
+    # ── Reflection Agent read/write ─────────────────────────────────────
+
+    def get_base_credibility(self, source_id: str) -> Optional[float]:
+        """Return static base_credibility for a Source node, or None if unknown."""
+        return self._graph.get_base_credibility(source_id)
+
+    def get_topic_for_verdict(self, verdict_id: str) -> str:
+        """Return the topic_text of the Claim linked to this Verdict, or '' if not found."""
+        return self._graph.get_topic_for_verdict(verdict_id)
+
+    def get_source_topic_credibility(self, source_id: str, topic: str) -> Optional[float]:
+        """Return current dynamic credibility for (source, topic), or None if no record."""
+        return self._graph.get_source_topic_credibility(source_id, topic)
+
+    def upsert_source_topic_credibility(
+        self, source_id: str, topic: str, credibility: float
+    ) -> None:
+        """Write (or update) the HAS_CREDIBILITY relationship in Neo4j."""
+        self._graph.upsert_source_topic_credibility(source_id, topic, credibility)
 
     def add_source_credibility_point(
         self,
@@ -548,7 +567,7 @@ class MemoryAgent:
         verdict_id: str,
         created_at: str,
     ) -> None:
-        """Append one (source, topic, credibility) observation."""
+        """Append one (source, topic, credibility) observation from HITL feedback."""
         embedding = self._embeddings.embed(topic_text)
         self._vector.upsert_source_credibility_point(
             point_id=point_id,
@@ -567,3 +586,4 @@ class MemoryAgent:
         """Retrieve k nearest (source, topic) credibility observations."""
         embedding = self._embeddings.embed(claim_text)
         return self._vector.query_source_credibility(embedding, source_id=source_id, k=k)
+

@@ -36,6 +36,9 @@ class FactCheckState(TypedDict):
     # ── Source credibility (from Reflection Agent) ────────────────────────────
     source_credibility: Optional[dict]
 
+    # ── Effective topic (classified by query_memory when topic_text is empty) ──
+    effective_topic: str
+
     # ── Cross-modal ───────────────────────────────────────────────────────────
     cross_modal_flag: bool
     cross_modal_explanation: Optional[str]
@@ -57,6 +60,7 @@ INITIAL_STATE: dict = {
     "neutral_reasoning":       None,
     "debate_transcript":       None,
     "source_credibility":      None,
+    "effective_topic":         "",
     "cross_modal_flag":        False,
     "cross_modal_explanation": None,
     "clip_similarity_score":   None,
