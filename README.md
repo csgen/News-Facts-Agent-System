@@ -437,3 +437,55 @@ docker pull python:3.12-slim
 docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
 # paste the new digest into Dockerfile line 1
 ```
+
+flowchart LR
+    subgraph triggers["TRIGGERS"]
+        direction TB
+        T1["push / PR"]
+        T2["push to main"]
+        T3["tag v*.*.*"]
+        T4["cron 6,18 UTC"]
+        T5["Dependabot weekly"]
+        T6["manual dispatch"]
+    end
+
+    subgraph workflows["GITHUB ACTIONS (.github/workflows/)"]
+        direction TB
+        W1["ci.yml<br/>lint · pytest · coverage"]
+        W2["release-image.yml<br/>buildx · push to GHCR"]
+        W3["release.yml<br/>changelog · GH Release"]
+        W4["scrape.yml<br/>scrape · preprocess · ingest"]
+    end
+
+    subgraph artifacts["ARTIFACTS & DESTINATIONS"]
+        direction TB
+        A1["coverage.xml<br/>(14-day artifact)"]
+        A2["ghcr.io/.../news_facts_system<br/>:latest · :sha-xxxxx · :vX.Y.Z"]
+        A3["GitHub Releases<br/>(auto changelog)"]
+        A4["Neo4j Aura"]
+        A5["ChromaDB Cloud"]
+    end
+
+    T1 --> W1
+    T2 --> W1
+    T2 --> W2
+    T3 --> W2
+    T3 --> W3
+    T4 --> W4
+    T5 -.->|opens PR| T1
+    T6 -.-> W1
+    T6 -.-> W2
+    T6 -.-> W4
+
+    W1 --> A1
+    W2 --> A2
+    W3 --> A3
+    W4 --> A4
+    W4 --> A5
+
+    classDef trigger fill:#e8f4ff,stroke:#0366d6
+    classDef workflow fill:#fff4e6,stroke:#d97706
+    classDef artifact fill:#e8fff0,stroke:#15803d
+    class T1,T2,T3,T4,T5,T6 trigger
+    class W1,W2,W3,W4 workflow
+    class A1,A2,A3,A4,A5 artifact
