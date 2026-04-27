@@ -105,12 +105,16 @@ def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
 
 
 def fact_check_claim(
-    claim_text: str, source_url: str = "https://unknown.source"
+    claim_text: str,
+    source_url: str = "https://unknown.source",
+    image_url: Optional[str] = None,
+    image_caption: Optional[str] = None,
 ) -> FactCheckOutput:
     """Convenience wrapper: fact-check a single raw text claim.
 
     Creates a synthetic FactCheckInput (no article, no entities) and runs the graph.
     Used by the Streamlit frontend for direct user queries.
+    Pass image_url (and optionally image_caption) to enable cross-modal checking.
     """
     graph = _get_graph()
     fc_input = FactCheckInput(
@@ -119,8 +123,8 @@ def fact_check_claim(
         entities=[],
         source_url=source_url,
         article_id=make_id("art_"),
-        image_caption=None,
-        image_url=None,
+        image_caption=image_caption,
+        image_url=image_url or None,
         timestamp=datetime.now(timezone.utc),
     )
     state = graph.invoke({"input": fc_input})

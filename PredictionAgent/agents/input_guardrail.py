@@ -1,4 +1,4 @@
-"""
+﻿"""
 Input Guardrail Agent
 Task 3 — Full-Stack & Evaluation Engineer
 
@@ -268,3 +268,4 @@ def check_input(text: str) -> dict:
     # Layer B — LLM classifier (only if A passed)
     result_b = layer_b_check(text)
     return result_b
+

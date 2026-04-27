@@ -212,18 +212,25 @@ class GraphStore:
         with self._driver.session() as session:
             session.run(
                 """
-                MATCH (c:Claim {claim_id: $claim_id})
-                CREATE (v:Verdict {
-                    verdict_id: $verdict_id,
-                    claim_id: $claim_id,
-                    label: $label,
-                    confidence: $confidence,
-                    evidence_summary: $evidence_summary,
-                    image_mismatch: $image_mismatch,
-                    verified_at: datetime($verified_at),
-                    status: 'active'
-                })
-                CREATE (c)-[:VERIFIED_AS]->(v)
+                MERGE (c:Claim {claim_id: $claim_id})
+                ON CREATE SET
+                    c.claim_text   = '',
+                    c.extracted_at = datetime(),
+                    c.status       = 'pending'
+                MERGE (v:Verdict {verdict_id: $verdict_id})
+                ON CREATE SET
+                    v.claim_id         = $claim_id,
+                    v.label            = $label,
+                    v.confidence       = $confidence,
+                    v.evidence_summary = $evidence_summary,
+                    v.bias_score       = $bias_score,
+                    v.image_mismatch   = $image_mismatch,
+                    v.verified_at      = datetime($verified_at)
+                ON MATCH SET
+                    v.label            = $label,
+                    v.confidence       = $confidence,
+                    v.evidence_summary = $evidence_summary
+                MERGE (c)-[:VERIFIED_AS]->(v)
                 SET c.status = 'verified'
                 """,
                 verdict_id=verdict_id,
@@ -724,6 +731,60 @@ class GraphStore:
                 article_id=article_id,
             )
             return [record["claim_id"] for record in result]
+
+    # ── Feature: Source Bias ────────────────────────────────────────────
+
+    def get_source_bias_for_entity(self, entity_name: str) -> list[dict]:
+        """Return per-source claim stats for a given entity."""
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                MATCH (s:Source)-[:PUBLISHES]->(a:Article)
+                      -[:CONTAINS]->(c:Claim)-[:MENTIONS]->(e:Entity)
+                WHERE toLower(e.name) = toLower($entity_name)
+                OPTIONAL MATCH (c)-[:VERIFIED_AS]->(v:Verdict)
+                WITH s.name AS source_name,
+                     count(DISTINCT c) AS claim_count,
+                     avg(v.confidence)  AS avg_confidence,
+                     sum(CASE WHEN v.label = 'supported'  THEN 1 ELSE 0 END) AS supported,
+                     sum(CASE WHEN v.label = 'refuted'    THEN 1 ELSE 0 END) AS refuted,
+                     sum(CASE WHEN v.label = 'misleading' THEN 1 ELSE 0 END) AS misleading
+                WHERE claim_count > 0
+                RETURN source_name, claim_count, avg_confidence,
+                       supported, refuted, misleading
+                ORDER BY claim_count DESC
+                LIMIT 10
+                """,
+                entity_name=entity_name,
+            )
+            return [dict(r) for r in result]
+
+    # ── Feature: Human Feedback / Verdict Override ──────────────────────
+
+    def update_verdict_with_feedback(
+        self,
+        verdict_id: str,
+        correct_label: str,
+        correct_confidence: float,
+        feedback_note: str = "",
+    ) -> None:
+        """Override a verdict with human-corrected label and confidence."""
+        with self._driver.session() as session:
+            session.run(
+                """
+                MATCH (v:Verdict {verdict_id: $verdict_id})
+                SET v.label              = $label,
+                    v.confidence         = $confidence,
+                    v.human_feedback     = true,
+                    v.feedback_note      = $note,
+                    v.corrected_at       = datetime()
+                """,
+                verdict_id=verdict_id,
+                label=correct_label,
+                confidence=correct_confidence,
+                note=feedback_note,
+            )
+            print(f"[graph_store] verdict {verdict_id} overridden → {correct_label} ({correct_confidence:.0%})")
 
     def auto_store_claim_with_entities(
         self,
