@@ -29,6 +29,9 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "feedparser"
+      - dependency-name: "respx"
+      - dependency-name: "tqdm"
 
   # ── GitHub Actions (workflow `uses:` pins) ────────────────────────────────
   # Near-zero risk — these run only inside CI runners.
