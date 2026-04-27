@@ -223,7 +223,6 @@ class GraphStore:
                     v.label            = $label,
                     v.confidence       = $confidence,
                     v.evidence_summary = $evidence_summary,
-                    v.bias_score       = 0.5,
                     v.image_mismatch   = $image_mismatch,
                     v.verified_at      = datetime($verified_at)
                 ON MATCH SET
@@ -731,6 +730,24 @@ class GraphStore:
                 article_id=article_id,
             )
             return [record["claim_id"] for record in result]
+
+    def get_article_url_by_id(self, article_id: str) -> Optional[str]:
+        """Return the URL stored on the Article node, or None if missing.
+
+        Used by the fact-check adapter to populate FactCheckInput.source_url
+        when reconstructing inputs from claim_ids alone.
+        """
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                MATCH (a:Article {article_id: $article_id})
+                RETURN a.url AS url
+                LIMIT 1
+                """,
+                article_id=article_id,
+            )
+            record = result.single()
+            return record["url"] if record and record["url"] else None
 
     # ── Feature: Source Bias ────────────────────────────────────────────
 

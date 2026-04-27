@@ -1,7 +1,7 @@
 """Centralized LLM prompt templates for the Preprocessing Agent."""
 
 CLAIM_ISOLATION_PROMPT = """\
-You are a fact-checking assistant. Given a news article/short statement, extract all falsifiable claims.
+You are a fact-checking assistant. Given a news article/short statement, extract all falsifiable claims, at least 1.
 
 A falsifiable claim is a concrete statement that can be verified as true or false using evidence.
 If there is explicit expression of the statement source, it should also be included in the claim.
@@ -18,7 +18,7 @@ For each claim, also classify:
    sports | entertainment | climate | crime | art
    Pick the single best fit. Suggest one word only if no category applies.
 
-Article title: {title}
+Article title, if this is a one sentence short statement, use it for title: {title}
 
 Article text:
 {body_text}

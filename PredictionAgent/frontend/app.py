@@ -276,217 +276,196 @@ def _run_entity_tracker_background(claim_text_or_name: str, direct_name: str = "
     thread.start()
 
 
-def _scrape_article(url: str) -> dict:
+def _sources_from_evidence_links(links: list[str]) -> list[dict]:
+    """Convert raw evidence URLs into the source-pill dicts the UI expects."""
+    out: list[dict] = []
+    for url in (links or [])[:4]:
+        parts = url.split("/")
+        name = parts[2] if len(parts) > 2 else url
+        out.append({"name": name, "url": url, "credibility": 0.5})
+    return out
+
+
+def _aggregate_label(verdicts: list) -> str:
+    """Rule-based article-level label from per-claim verdicts.
+
+    Majority wins; ties fall to 'misleading' (mixed signal).
     """
-    Fetch an article URL and extract title, body snippet, and og:image.
-    Returns dict with keys: title, body, image_url, claim_text
-    """
-    import re
-    try:
-        import requests
-        from bs4 import BeautifulSoup
+    counts: dict[str, int] = {}
+    for v in verdicts:
+        counts[v.verdict] = counts.get(v.verdict, 0) + 1
+    if not counts:
+        return "misleading"
+    top = max(counts.items(), key=lambda kv: kv[1])
+    # If there's a tie at the top, treat as mixed
+    if list(counts.values()).count(top[1]) > 1:
+        return "misleading"
+    return top[0]
 
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            )
-        }
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
 
-        # ── Title ──
-        title = ""
-        og_title = soup.find("meta", property="og:title")
-        if og_title and og_title.get("content"):
-            title = og_title["content"].strip()
-        elif soup.find("title"):
-            title = soup.find("title").get_text(strip=True)
-
-        # ── Description / lede ──
-        description = ""
-        og_desc = soup.find("meta", property="og:description")
-        if og_desc and og_desc.get("content"):
-            description = og_desc["content"].strip()
-        else:
-            meta_desc = soup.find("meta", attrs={"name": "description"})
-            if meta_desc and meta_desc.get("content"):
-                description = meta_desc["content"].strip()
-
-        # ── Body text (first ~600 chars of article paragraphs) ──
-        body = ""
-        for tag in soup.find_all(["article", "main", "div"], limit=5):
-            paras = tag.find_all("p")
-            if len(paras) >= 3:
-                body = " ".join(p.get_text(strip=True) for p in paras[:6])
-                body = re.sub(r"\s+", " ", body)[:600]
-                break
-        if not body:
-            paras = soup.find_all("p")
-            body = " ".join(p.get_text(strip=True) for p in paras[:6])
-            body = re.sub(r"\s+", " ", body)[:600]
-
-        # ── Image URL ──
-        image_url = ""
-        og_img = soup.find("meta", property="og:image")
-        if og_img and og_img.get("content"):
-            image_url = og_img["content"].strip()
-
-        # ── Build claim text for the pipeline ──
-        parts = [p for p in [title, description] if p]
-        claim_text = ". ".join(parts) if parts else (body[:300] if body else url)
-
-        return {
-            "title":      title,
-            "body":       body,
-            "image_url":  image_url,
-            "claim_text": claim_text,
-            "error":      None,
-        }
-
-    except Exception as e:
-        return {
-            "title":      "",
-            "body":       "",
-            "image_url":  "",
-            "claim_text": url,
-            "error":      str(e),
-        }
+def _empty_result(query: str, err_msg: str, image_url: str = "") -> dict:
+    return {
+        "verdict_id":       None,
+        "label":            "misleading",
+        "confidence":       0.0,
+        "claim_text":       query[:200],
+        "evidence_summary": err_msg,
+        "image_mismatch":   False,
+        "image_url":        image_url,
+        "vlm_caption":      "",
+        "sources":          [],
+        "charged_phrases":  [],
+        "claims":           [],
+        "is_multi":         False,
+    }
 
 
 def get_real_verdict(query: str) -> dict:
-    """
-    Call Task 2's Fact-Check Agent (LangGraph pipeline) for a raw claim or URL.
+    """Run the full preprocessing → fact-check pipeline for a user query.
 
-    If query is a URL, scrapes the article first and fact-checks the extracted text.
-    Falls back to an error result if the pipeline is unavailable.
+    The query may be a URL, a long article body, or a short typed claim;
+    `decompose_input` classifies it and ingests the resulting article + claims
+    into Neo4j + ChromaDB. We then fact-check every extracted claim_id and
+    return a single aggregated dict (compatible with the existing UI rendering),
+    plus a `claims` list of per-claim sub-results for callers that want to
+    render each claim individually.
     """
-    # ── URL detection: scrape article first ──────────────────────────────
-    _image_url   = ""
-    _article_url = ""
     _display_claim = query[:200]
 
-    if query.strip().startswith(("http://", "https://")):
-        _article_url = query.strip()
-        with st.status("🌐 Fetching article...", expanded=False) as _s:
-            scraped = _scrape_article(_article_url)
-            if scraped["error"]:
-                _s.update(label=f"⚠️ Could not fetch article: {scraped['error']}", state="error")
-            else:
-                _s.update(label=f"✅ Article loaded: {scraped['title'] or _article_url}", state="complete")
-
-        _image_url     = scraped["image_url"]
-        _display_claim = scraped["claim_text"][:200]
-        claim_for_pipeline = scraped["claim_text"]
-
-        # Show what was extracted so user knows the pipeline is working on real content
-        if scraped["title"]:
-            st.info(f"**Article:** {scraped['title']}\n\n**Fact-checking:** {scraped['claim_text'][:200]}")
-    else:
-        claim_for_pipeline = query
-
-    # ── Human-correction cache: skip pipeline if we already have a human verdict ──
+    # ── HITL human-correction cache: skip the pipeline on a strong match ──
     try:
         _mem = _get_memory()
         if _mem:
-            print(f"[human_cache] searching for corrected verdict for: {claim_for_pipeline[:80]!r}")
-            _human = _mem.find_human_verdict_for_claim(claim_for_pipeline)
-            print(f"[human_cache] result: {_human}")
+            _human = _mem.find_human_verdict_for_claim(query)
             if _human:
-                print(f"[human_cache] HIT — returning human-corrected verdict: {_human.get('label')} {_human.get('confidence')}")
+                print(f"[human_cache] HIT — {_human.get('label')} {_human.get('confidence')}")
                 return {
                     "verdict_id":       _human.get("verdict_id"),
                     "label":            _human.get("label", "misleading"),
                     "confidence":       float(_human.get("confidence", 0.5)),
                     "claim_text":       _display_claim,
                     "evidence_summary": "✅ This verdict was previously corrected by a human reviewer.",
-                    "bias_score":       float(_human.get("bias_score", 0.5)),
                     "image_mismatch":   bool(_human.get("image_mismatch", False)),
-                    "image_url":        _image_url,
+                    "image_url":        "",
                     "vlm_caption":      "",
                     "sources":          [],
                     "charged_phrases":  [],
+                    "claims":           [],
+                    "is_multi":         False,
                 }
-            else:
-                print("[human_cache] MISS — running pipeline")
     except Exception as _hce:
         print(f"[human_cache] ERROR (falling through to pipeline): {_hce}")
 
+    # ── Decompose input → ingest claims → return claim_ids ──────────────
     try:
-        from agents.fact_check_agent import fact_check_claim
-        output = fact_check_claim(
-            claim_for_pipeline,
-            source_url=_article_url or "https://unknown.source",
-            image_url=_image_url or None,
-        )
+        from src.preprocessing.decompose import URLFetchError, decompose_input
+    except ImportError as _ie:
+        st.error(f"Preprocessing module unavailable: {_ie}")
+        return _empty_result(query, f"Preprocessing import failed: {_ie}")
 
-        # ── Store Claim + MENTIONS edges so entity tracker can count this claim ──
-        try:
-            import spacy as _spacy_cm
-            _nlp_cm  = _spacy_cm.load("en_core_web_sm")
-            _doc_cm  = _nlp_cm(claim_for_pipeline)
-            _valid   = {"PERSON", "ORG", "GPE", "PRODUCT", "NORP", "FAC", "EVENT"}
-            _ent_dicts = [
-                {
-                    "entity_id": "ent_" + e.text.lower().strip().replace(" ", "_"),
-                    "name":      e.text.strip(),
-                    "entity_type": e.label_.lower(),
-                    "sentiment": "neutral",
-                }
-                for e in _doc_cm.ents if e.label_ in _valid and len(e.text.strip()) > 1
-            ]
-            # Save detected entity names so the UI can show them
-            import streamlit as _st_inner
-            _st_inner.session_state["_auto_detected_entities"] = [e["name"] for e in _ent_dicts]
+    try:
+        with st.spinner("🔎 Decomposing input → claims + entities…"):
+            claim_ids = decompose_input(query)
+    except URLFetchError as _uf:
+        st.warning(f"⚠️ Could not fetch URL: {_uf}")
+        return _empty_result(query, f"URL fetch failed: {_uf}")
+    except Exception as _de:
+        st.error(f"Decomposition failed: {_de}")
+        return _empty_result(query, f"Decomposition error: {_de}")
 
-            _mem_cm = _get_memory()
-            if _mem_cm and _ent_dicts:
-                # Use output.claim_id — same ID the pipeline used to create
-                # the Claim node and [:VERIFIED_AS]→Verdict edge in Neo4j.
-                # This ensures [:MENTIONS] edges land on the SAME Claim node.
-                _article_id_cm = _article_url or f"art_{output.verdict_id}"
-                _mem_cm.auto_store_claim_with_entities(
-                    claim_id=output.claim_id,
-                    claim_text=claim_for_pipeline,
-                    article_id=_article_id_cm,
-                    entity_dicts=_ent_dicts,
-                )
-                print(f"[claim_store] claim_id={output.claim_id} — stored {len(_ent_dicts)} entities: {[e['name'] for e in _ent_dicts]}")
-        except Exception as _cse:
-            print(f"[claim_store] skipped: {_cse}")
-            import streamlit as _st_inner
-            _st_inner.session_state["_auto_detected_entities"] = []
+    if not claim_ids:
+        return _empty_result(query, "No claims could be extracted from this input.")
 
-        return {
-            "verdict_id":       output.verdict_id,
-            "label":            output.verdict,
-            "confidence":       output.confidence_score / 100,
-            "claim_text":       _display_claim,
-            "evidence_summary": output.reasoning,
-            "image_mismatch":   output.cross_modal_flag,
-            "image_url":        _image_url,
-            "vlm_caption":      output.cross_modal_explanation or "",
-            "sources":          [{"name": url.split("/")[2] if len(url.split("/")) > 2 else url,
-                                  "url": url, "credibility": 0.5}
-                                 for url in (output.evidence_links or [])[:4]],
-            "charged_phrases":  [],
-        }
+    # ── Fact-check each ingested claim ──────────────────────────────────
+    try:
+        from agents.fact_check_agent import run_fact_check_by_claim_ids
+        with st.spinner(f"🔍 Fact-checking {len(claim_ids)} claim(s)…"):
+            verdicts = run_fact_check_by_claim_ids(claim_ids)
     except Exception as e:
         st.error(f"Fact-Check Agent unavailable: {e}")
-        return {
-            "verdict_id":       None,
-            "label":            "misleading",
-            "confidence":       0.0,
-            "claim_text":       _display_claim,
-            "evidence_summary": f"Pipeline error: {e}",
-            "image_mismatch":   False,
-            "image_url":        _image_url,
-            "vlm_caption":      "",
-            "sources":          [],
-            "charged_phrases":  [],
-        }
+        return _empty_result(query, f"Pipeline error: {e}")
+
+    if not verdicts:
+        return _empty_result(query, "No verdicts produced by the fact-check pipeline.")
+
+    # ── Surface entity names for the entity tracker box ─────────────────
+    try:
+        _entity_names: list[str] = []
+        _seen: set[str] = set()
+        _mem_for_ents = _get_memory()
+        if _mem_for_ents:
+            for cid in claim_ids:
+                for ent in (_mem_for_ents.get_entity_context(cid) or []):
+                    name = (ent.get("name") or "").strip()
+                    if name and name.lower() not in _seen:
+                        _seen.add(name.lower())
+                        _entity_names.append(name)
+        st.session_state["_auto_detected_entities"] = _entity_names
+    except Exception as _ee:
+        print(f"[entity_lookup] skipped: {_ee}")
+        st.session_state["_auto_detected_entities"] = []
+
+    # ── Build per-claim sub-dicts ───────────────────────────────────────
+    sub_claims: list[dict] = []
+    _mem_for_text = _get_memory()
+    claim_text_by_id: dict[str, str] = {}
+    if _mem_for_text:
+        try:
+            r = _mem_for_text.get_claims_by_ids(claim_ids) or {}
+            for i, cid in enumerate(r.get("ids") or []):
+                docs = r.get("documents") or []
+                if i < len(docs):
+                    claim_text_by_id[cid] = docs[i]
+        except Exception:
+            pass
+
+    for v in verdicts:
+        sub_claims.append({
+            "verdict_id":       v.verdict_id,
+            "claim_id":         v.claim_id,
+            "label":            v.verdict,
+            "confidence":       v.confidence_score / 100,
+            "claim_text":       claim_text_by_id.get(v.claim_id, ""),
+            "evidence_summary": v.reasoning,
+            "image_mismatch":   getattr(v, "cross_modal_flag", False),
+            "vlm_caption":      getattr(v, "cross_modal_explanation", "") or "",
+            "sources":          _sources_from_evidence_links(getattr(v, "evidence_links", None) or []),
+        })
+
+    is_multi = len(sub_claims) > 1
+    headline = sub_claims[0]
+    agg_label = _aggregate_label(verdicts) if is_multi else headline["label"]
+    avg_conf  = (sum(sc["confidence"] for sc in sub_claims) / len(sub_claims)) if sub_claims else 0.0
+
+    # Headline summary: for single-claim, use the claim's reasoning verbatim;
+    # for multi-claim, prepend a short breakdown line.
+    if is_multi:
+        counts: dict[str, int] = {}
+        for sc in sub_claims:
+            counts[sc["label"]] = counts.get(sc["label"], 0) + 1
+        breakdown = ", ".join(f"{n} {label}" for label, n in counts.items())
+        headline_summary = (
+            f"📋 **{len(sub_claims)} claims extracted** ({breakdown}). "
+            f"Showing the first claim below — see per-claim breakdown for the rest.\n\n"
+            + headline["evidence_summary"]
+        )
+    else:
+        headline_summary = headline["evidence_summary"]
+
+    return {
+        "verdict_id":       headline["verdict_id"],
+        "label":            agg_label,
+        "confidence":       avg_conf,
+        "claim_text":       _display_claim,
+        "evidence_summary": headline_summary,
+        "image_mismatch":   any(sc["image_mismatch"] for sc in sub_claims),
+        "image_url":        "",  # populated below if any caption exists
+        "vlm_caption":      headline["vlm_caption"],
+        "sources":          headline["sources"],
+        "charged_phrases":  [],
+        "claims":           sub_claims,
+        "is_multi":         is_multi,
+    }
 
 
 def get_real_entity_history(entity_name: str) -> pd.DataFrame:
@@ -1072,6 +1051,35 @@ if _cached_result and (run_btn or not run_btn):
                 </div>
                 """, unsafe_allow_html=True)
 
+        # ── Per-claim breakdown (only when the input decomposed into >1 claim) ──
+        _sub_claims = result.get("claims") or []
+        if result.get("is_multi") and len(_sub_claims) > 1:
+            st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+            with st.expander(f"📋  Per-claim breakdown — {len(_sub_claims)} claims", expanded=False):
+                for _i, _sc in enumerate(_sub_claims, start=1):
+                    _sc_label = _sc.get("label", "misleading")
+                    _sc_text  = (_sc.get("claim_text") or "").strip()
+                    _sc_reason = (_sc.get("evidence_summary") or "").strip()
+                    _sc_conf   = _sc.get("confidence", 0.0)
+                    st.markdown(f"""
+                    <div class="verdict-card verdict-{_sc_label}" style="margin-top:0.6rem;">
+                        <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.5rem;">
+                            <span style="font-family:'Space Mono',monospace; font-size:0.7rem;
+                                         letter-spacing:0.1em; color:#64748b;">CLAIM {_i}</span>
+                            {render_verdict_badge(_sc_label)}
+                            <span style="margin-left:auto; font-size:0.78rem; color:#94a3b8;">
+                                confidence {_sc_conf:.0%}
+                            </span>
+                        </div>
+                        <div style="font-size:0.85rem; color:#cbd5e1; font-style:italic; margin-bottom:0.5rem;">
+                            "{_sc_text}"
+                        </div>
+                        <div style="font-size:0.85rem; color:#94a3b8; line-height:1.6;">
+                            {_sc_reason}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
         # ── Human Feedback form (only shown when confidence is low) ──────
         _confidence = result["confidence"]
         _verdict_id = result.get("verdict_id")
@@ -1152,7 +1160,6 @@ if _cached_result and (run_btn or not run_btn):
                                     topic_text   = _claim_text,
                                     source_id    = _source_id,
                                     credibility  = _correct_conf,
-                                    bias         = result.get("bias_score", 0.5),
                                     verdict_label= fb_label,
                                     verdict_id   = _verdict_id,
                                     created_at   = datetime.now(timezone.utc).isoformat(),
