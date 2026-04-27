@@ -56,3 +56,12 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(docker)"
+    # Stay on the Python 3.12 series. Block major + minor bumps so Dependabot
+    # never proposes 3.12 → 3.13 / 3.14 / 4.x. Patch bumps (digest re-pulls
+    # within 3.12-slim, e.g. when upstream republishes after a CPython point
+    # release or Debian security patch) are still allowed.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
