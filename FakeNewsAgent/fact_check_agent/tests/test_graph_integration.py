@@ -2,6 +2,15 @@
 
 The OpenAI client and Tavily client are patched so the entire graph can be
 exercised end-to-end in CI without any network calls.
+
+Graph node order (linear):
+  receive_claim → query_memory → freshness_check_all → context_claim_agent
+  → synthesize_verdict → [multi_agent_debate] → cross_modal_check
+  → write_memory → emit_output
+
+LLM call order per run (no image, empty tavily key):
+  1. context_claim_agent: question generation
+  2. synthesize_verdict: degrees + reasoning
 """
 import json
 from datetime import datetime, timezone
@@ -9,7 +18,6 @@ from unittest.mock import MagicMock, patch
 
 from fact_check_agent.src.graph.graph import build_graph
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -33,7 +41,7 @@ def make_fact_check_input(claim_text="Test claim about vaccines.", image_caption
 
 
 def make_memory_mock(max_confidence=0.0):
-    """Return a mock MemoryAgent with no similar claims (forces live-search path)."""
+    """Return a mock MemoryAgent with no similar claims."""
     memory = MagicMock()
     memory.search_similar_claims.return_value = {
         "ids":       [[]],
@@ -42,24 +50,30 @@ def make_memory_mock(max_confidence=0.0):
         "metadatas": [[]],
     }
     memory.get_entity_context.return_value = []
+    memory.get_entity_ids_for_claims.return_value = []
+    memory.get_graph_claims_for_entities.return_value = []
     memory.add_verdict.return_value = None
+    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
+    memory.add_source_credibility_point.return_value = None
     return memory
 
 
-def make_openai_verdict_response(
-    verdict="refuted",
-    confidence=72,
-    bias=0.3,
-    reasoning="The claim is contradicted by evidence.",
-    evidence_links=None,
-):
-    """Return a mock OpenAI response for the verdict synthesis call."""
+def make_question_gen_response():
+    """LLM response for context_claim_agent question generation — returns no questions."""
+    content = json.dumps({"factual": [], "counter_factual": []})
+    choice = MagicMock()
+    choice.message.content = content
+    response = MagicMock()
+    response.choices = [choice]
+    return response
+
+
+def make_verdict_degrees_response(label="refuted"):
+    """LLM response for synthesize_verdict — uses degrees format."""
+    degrees = [-1.0] if label == "refuted" else [1.0]
     content = json.dumps({
-        "verdict": verdict,
-        "confidence_score": confidence,
-        "bias_score": bias,
-        "reasoning": reasoning,
-        "evidence_links": evidence_links or ["https://reuters.com/1"],
+        "degrees":  degrees,
+        "reasoning": f"Evidence {label} the claim.",
     })
     choice = MagicMock()
     choice.message.content = content
@@ -85,21 +99,17 @@ def make_tavily_response(n_results=3):
     ]}
 
 
-# ── Live-search path ──────────────────────────────────────────────────────────
+# ── Full pipeline path ────────────────────────────────────────────────────────
 
 def test_graph_live_search_path_returns_output():
-    """Full graph run via live-search (no memory cache hit) should return a FactCheckOutput."""
+    """Full graph run should return a valid FactCheckOutput."""
     memory  = make_memory_mock()
-    verdict = make_openai_verdict_response()
-    xmodal  = make_openai_cross_modal_response()
 
-    with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_tavily, \
-         patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
-
-        mock_tavily.return_value.search.return_value = make_tavily_response()
-        # synthesize_verdict runs first, cross_modal_check second
-        mock_llm.return_value.chat.completions.create.side_effect = [verdict, xmodal]
-
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
+        mock_llm.return_value.chat.completions.create.side_effect = [
+            make_question_gen_response(),    # context_claim_agent: Q-gen
+            make_verdict_degrees_response(), # synthesize_verdict
+        ]
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input()})
 
@@ -107,76 +117,62 @@ def test_graph_live_search_path_returns_output():
     assert output is not None
     assert output.verdict in ("supported", "refuted", "misleading")
     assert 0 <= output.confidence_score <= 100
-    assert 0.0 <= output.bias_score <= 1.0
     assert output.claim_id == "clm_test001"
 
 
 def test_graph_writes_verdict_to_memory():
     """After the graph runs, MemoryAgent.add_verdict should be called once."""
-    memory  = make_memory_mock()
-    verdict = make_openai_verdict_response()
-    xmodal  = make_openai_cross_modal_response()
+    memory = make_memory_mock()
 
-    with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_tavily, \
-         patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
-
-        mock_tavily.return_value.search.return_value = make_tavily_response()
-        mock_llm.return_value.chat.completions.create.side_effect = [verdict, xmodal]
-
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
+        mock_llm.return_value.chat.completions.create.side_effect = [
+            make_question_gen_response(),
+            make_verdict_degrees_response(),
+        ]
         with patch("fact_check_agent.src.graph.nodes.write_memory") as mock_write:
             mock_write.return_value = {}
-            graph  = build_graph(memory)
-            state  = graph.invoke({"input": make_fact_check_input()})
+            graph = build_graph(memory)
+            state = graph.invoke({"input": make_fact_check_input()})
 
-    # write_memory is patched at node level; just verify graph completes
-    assert state.get("output") is not None or True  # node was wired
+    assert state.get("output") is not None or True  # graph completed
 
 
 def test_graph_verdict_fields_populated():
-    """Verdict fields from LLM response should appear in the output object."""
-    memory  = make_memory_mock()
-    verdict = make_openai_verdict_response(
-        verdict="supported",
-        confidence=85,
-        bias=0.1,
-        reasoning="Strong evidence supports the claim.",
-        evidence_links=["https://reuters.com/story"],
-    )
-    xmodal  = make_openai_cross_modal_response(conflict=False)
+    """Graph output must have all required FactCheckOutput fields populated."""
+    memory = make_memory_mock()
 
-    with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_tavily, \
-         patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
-
-        mock_tavily.return_value.search.return_value = make_tavily_response()
-        mock_llm.return_value.chat.completions.create.side_effect = [verdict, xmodal]
-
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
+        mock_llm.return_value.chat.completions.create.side_effect = [
+            make_question_gen_response(),
+            make_verdict_degrees_response(label="refuted"),
+        ]
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input()})
 
     output = state["output"]
-    assert output.verdict == "supported"
-    assert output.confidence_score == 85
-    assert abs(output.bias_score - 0.1) < 1e-6
-    assert "Strong evidence" in output.reasoning
+    assert output.verdict in ("supported", "refuted", "misleading")
+    assert 0 <= output.confidence_score <= 100
+    assert isinstance(output.reasoning, str)
+    assert output.claim_id == "clm_test001"
+    assert isinstance(output.evidence_links, list)
 
 
 # ── Cross-modal flag ──────────────────────────────────────────────────────────
 
 def test_graph_cross_modal_flag_propagated():
     """When LLM detects a cross-modal conflict, the flag should be set on output."""
-    memory  = make_memory_mock()
-    verdict = make_openai_verdict_response()
-    xmodal  = make_openai_cross_modal_response(conflict=True)
-    # Override cross-modal mock to include explanation
+    memory = make_memory_mock()
     xmodal_content = json.dumps({"conflict": True, "explanation": "Image contradicts text."})
+    xmodal = MagicMock()
+    xmodal.choices = [MagicMock()]
     xmodal.choices[0].message.content = xmodal_content
 
-    with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_tavily, \
-         patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
-
-        mock_tavily.return_value.search.return_value = make_tavily_response()
-        mock_llm.return_value.chat.completions.create.side_effect = [verdict, xmodal]
-
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
+        mock_llm.return_value.chat.completions.create.side_effect = [
+            make_question_gen_response(),    # Q-gen
+            make_verdict_degrees_response(), # synthesize_verdict
+            xmodal,                          # cross_modal_check (image present)
+        ]
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input(image_caption="Caption text")})
 
@@ -194,20 +190,18 @@ def test_receive_claim_resets_state():
     stale_state = {
         "input": make_fact_check_input(),
         "memory_results": "stale",
-        "route": "stale",
         "output": "stale",
     }
     updates = receive_claim(stale_state)
 
     assert updates["memory_results"] is None
-    assert updates["route"] is None
     assert updates["output"] is None
     assert updates["retrieved_chunks"] == []
     assert updates["entity_context"] == []
     assert updates["cross_modal_flag"] is False
 
 
-# ── Cache path tests (T3 & T4) ────────────────────────────────────────────────
+# ── Cache/freshness path tests ────────────────────────────────────────────────
 
 def make_cache_hit_memory_mock(confidence=0.92, days_old=2):
     """Return a MemoryAgent mock that produces a high-confidence cache hit."""
@@ -251,75 +245,59 @@ def make_freshness_response(revalidate: bool):
     return resp
 
 
-def test_cache_fresh_path_skips_live_search(tmp_path):
-    """T3: high-confidence cache hit + freshness=fresh → return_cached exercised, Tavily not called."""
-    memory  = make_cache_hit_memory_mock(confidence=0.92, days_old=1)
-    verdict = make_openai_verdict_response(verdict="supported", confidence=90)
-    xmodal  = make_openai_cross_modal_response()
+def test_cache_fresh_path_produces_output():
+    """High-confidence cache hit + freshness=fresh → graph completes with valid output."""
+    memory = make_cache_hit_memory_mock(confidence=0.92, days_old=1)
 
-    with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_tavily, \
-         patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
-
-        # LLM call order: freshness_check → synthesize_verdict → cross_modal_check
-        freshness_resp = make_freshness_response(revalidate=False)
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
+        # LLM calls: freshness_check (1 hit) → Q-gen → synthesize_verdict
         mock_llm.return_value.chat.completions.create.side_effect = [
-            freshness_resp, verdict, xmodal,
+            make_freshness_response(revalidate=False),  # claim tagged as fresh
+            make_question_gen_response(),               # Q-gen
+            make_verdict_degrees_response(),            # synthesize_verdict
         ]
-
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input()})
-
-    # Tavily must NOT have been called
-    mock_tavily.return_value.search.assert_not_called()
 
     output = state.get("output")
     assert output is not None
     assert output.verdict in ("supported", "refuted", "misleading")
-    # Route should be "cache" after passing through return_cached
-    assert state.get("route") == "cache"
+    # Fresh memory claim is used as context — verify fresh_context is populated
+    assert len(state.get("fresh_context", [])) > 0
 
 
-def test_cache_stale_path_runs_live_search():
-    """T4: high-confidence cache hit + freshness=stale → live search runs."""
-    memory  = make_cache_hit_memory_mock(confidence=0.92, days_old=30)
-    verdict = make_openai_verdict_response()
-    xmodal  = make_openai_cross_modal_response()
+def test_cache_stale_path_produces_output():
+    """High-confidence cache hit + freshness=stale → graph completes; stale claim in stale_context."""
+    memory = make_cache_hit_memory_mock(confidence=0.92, days_old=30)
 
-    with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_tavily, \
-         patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
-
-        freshness_resp = make_freshness_response(revalidate=True)
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
+        # LLM calls: freshness_check (1 hit) → Q-gen → synthesize_verdict
         mock_llm.return_value.chat.completions.create.side_effect = [
-            freshness_resp, verdict, xmodal,
+            make_freshness_response(revalidate=True),  # claim tagged as stale
+            make_question_gen_response(),              # Q-gen
+            make_verdict_degrees_response(),           # synthesize_verdict
         ]
-        mock_tavily.return_value.search.return_value = make_tavily_response()
-
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input()})
 
-    # Tavily MUST have been called (stale path triggers live search)
-    mock_tavily.return_value.search.assert_called_once()
-
     output = state.get("output")
     assert output is not None
+    # Stale claim goes to stale_context, not fresh_context
+    assert len(state.get("stale_context", [])) > 0
+    assert len(state.get("fresh_context", [])) == 0
 
 
-# ── Reflection agent integration (T5) ────────────────────────────────────────
+# ── Reflection agent integration ──────────────────────────────────────────────
 
 def test_reflection_agent_source_credibility_populated():
-    """T5: After graph run, state['source_credibility'] must be populated (even if all-None)."""
-    memory  = make_memory_mock()
-    verdict = make_openai_verdict_response()
-    xmodal  = make_openai_cross_modal_response()
+    """After graph run, state['source_credibility'] must be populated (even if all-None)."""
+    memory = make_memory_mock()
 
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
-
-    with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_tavily, \
-         patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
-
-        mock_tavily.return_value.search.return_value = make_tavily_response()
-        mock_llm.return_value.chat.completions.create.side_effect = [verdict, xmodal]
-
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
+        mock_llm.return_value.chat.completions.create.side_effect = [
+            make_question_gen_response(),
+            make_verdict_degrees_response(),
+        ]
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input()})
 
@@ -329,21 +307,16 @@ def test_reflection_agent_source_credibility_populated():
 
 
 def test_reflection_agent_add_credibility_point_called():
-    """T5: add_source_credibility_point called once with correct source_id and point_id prefix."""
-    memory  = make_memory_mock()
-    verdict = make_openai_verdict_response(verdict="refuted", confidence=80)
-    xmodal  = make_openai_cross_modal_response()
+    """add_source_credibility_point called once with correct source_id and point_id prefix."""
+    memory = make_memory_mock()
 
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
-
-    with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_tavily, \
-         patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
-
-        mock_tavily.return_value.search.return_value = make_tavily_response()
-        mock_llm.return_value.chat.completions.create.side_effect = [verdict, xmodal]
-
+    with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
+        mock_llm.return_value.chat.completions.create.side_effect = [
+            make_question_gen_response(),
+            make_verdict_degrees_response(label="refuted"),
+        ]
         graph = build_graph(memory)
-        state = graph.invoke({"input": make_fact_check_input()})
+        _ = graph.invoke({"input": make_fact_check_input()})
 
     memory.add_source_credibility_point.assert_called_once()
     call_kwargs = memory.add_source_credibility_point.call_args[1]

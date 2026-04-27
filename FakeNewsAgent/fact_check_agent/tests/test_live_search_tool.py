@@ -7,7 +7,6 @@ from fact_check_agent.src.tools.live_search_tool import (
     search_live,
 )
 
-
 # ── _count_distinct_domains ───────────────────────────────────────────────────
 
 def test_count_distinct_domains_all_same():

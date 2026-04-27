@@ -44,6 +44,7 @@ class ClaimIsolator:
                     valid_claims.append({
                         "text": claim["text"],
                         "type": claim.get("type", ""),
+                        "topic_text": claim.get("topic_text", ""),
                     })
 
             logger.info("Extracted %d claims from article", len(valid_claims))

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Input Guardrail Agent
 Task 3 — Full-Stack & Evaluation Engineer
 
@@ -23,8 +23,8 @@ Returns:
     }
 """
 
-import re
 import logging
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -237,7 +237,7 @@ def layer_b_check(text: str) -> dict:
         if blocked:
             print(f"[guardrail.B] BLOCKED ({risk}): {reason}")
         else:
-            print(f"[guardrail.B] PASS")
+            print("[guardrail.B] PASS")
 
         return {"blocked": blocked, "reason": reason, "layer": "B", "risk": risk}
 
@@ -267,3 +267,4 @@ def check_input(text: str) -> dict:
     # Layer B — LLM classifier (only if A passed)
     result_b = layer_b_check(text)
     return result_b
+

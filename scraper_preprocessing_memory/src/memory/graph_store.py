@@ -129,6 +129,7 @@ class GraphStore:
                         article_id: $article_id,
                         claim_text: $claim_text,
                         claim_type: $claim_type,
+                        topic_text: $topic_text,
                         extracted_at: datetime($extracted_at),
                         status: $status
                     })
@@ -138,6 +139,7 @@ class GraphStore:
                     claim_id=claim["claim_id"],
                     claim_text=claim["claim_text"],
                     claim_type=claim.get("claim_type", ""),
+                    topic_text=claim.get("topic_text", ""),
                     extracted_at=claim["extracted_at"],
                     status=claim.get("status", "pending"),
                 )
@@ -204,7 +206,6 @@ class GraphStore:
         label: str,
         confidence: float,
         evidence_summary: str,
-        bias_score: float,
         image_mismatch: bool,
         verified_at: datetime,
     ) -> None:
@@ -237,9 +238,26 @@ class GraphStore:
                 label=label,
                 confidence=confidence,
                 evidence_summary=evidence_summary,
-                bias_score=bias_score,
                 image_mismatch=image_mismatch,
                 verified_at=verified_at.isoformat(),
+            )
+
+    def supersede_verdict(self, old_verdict_id: str, new_verdict_id: str) -> None:
+        """Mark an old VERDICT node as superseded by a newer one.
+
+        Sets old.status = 'superseded' and creates a (old)-[:SUPERSEDED_BY]->(new) edge.
+        Idempotent — repeated calls leave the same end state thanks to MERGE on the edge.
+        """
+        with self._driver.session() as session:
+            session.run(
+                """
+                MATCH (old:Verdict {verdict_id: $old_id})
+                MATCH (new:Verdict {verdict_id: $new_id})
+                SET old.status = 'superseded'
+                MERGE (old)-[:SUPERSEDED_BY]->(new)
+                """,
+                old_id=old_verdict_id,
+                new_id=new_verdict_id,
             )
 
     # ── Write: Credibility Snapshots (called by Entity Tracker) ─────────
@@ -461,15 +479,20 @@ class GraphStore:
         entity_id: str,
         since: Optional[datetime] = None,
     ) -> list[dict]:
-        """Get claims mentioning an entity, optionally filtered by time."""
+        """Get claims mentioning an entity, optionally filtered by time.
+
+        Superseded verdicts are filtered out. Legacy verdicts (without a
+        status property) are treated as active.
+        """
         query = """
             MATCH (e:Entity {entity_id: $entity_id})<-[m:MENTIONS]-(c:Claim)
             -[:VERIFIED_AS]->(v:Verdict)
+            WHERE (v.status IS NULL OR v.status = 'active')
         """
         params: dict[str, Any] = {"entity_id": entity_id}
 
         if since:
-            query += " WHERE v.verified_at > datetime($since)"
+            query += " AND v.verified_at > datetime($since)"
             params["since"] = since.isoformat()
 
         query += """
@@ -671,7 +694,11 @@ class GraphStore:
             return [dict(record) for record in result]
 
     def get_graph_claims_for_entities(self, entity_ids: list[str]) -> list[dict]:
-        """Return verified claims mentioning a list of entities (for GraphRAG)."""
+        """Return verified claims mentioning a list of entities (for GraphRAG).
+
+        Superseded verdicts are filtered out. Legacy verdicts (without a
+        status property) are treated as active.
+        """
         if not entity_ids:
             return []
         with self._driver.session() as session:
@@ -679,6 +706,7 @@ class GraphStore:
                 """
                 MATCH (e:Entity)<-[m:MENTIONS]-(c:Claim)-[:VERIFIED_AS]->(v:Verdict)
                 WHERE e.entity_id IN $entity_ids
+                  AND (v.status IS NULL OR v.status = 'active')
                 RETURN c.claim_id AS claim_id,
                        c.claim_text AS claim_text,
                        v.label AS verdict_label,
@@ -692,18 +720,22 @@ class GraphStore:
             )
             return [dict(record) for record in result]
 
+    def get_claim_ids_for_article(self, article_id: str) -> list[str]:
+        """Return all claim_ids attached to a given article (via CONTAINS edge)."""
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                MATCH (a:Article {article_id: $article_id})-[:CONTAINS]->(c:Claim)
+                RETURN c.claim_id AS claim_id
+                """,
+                article_id=article_id,
+            )
+            return [record["claim_id"] for record in result]
+
     # ── Feature: Source Bias ────────────────────────────────────────────
 
     def get_source_bias_for_entity(self, entity_name: str) -> list[dict]:
-        """Return per-source claim stats for a given entity.
-
-        For each source that published claims mentioning this entity, returns:
-          source_name, claim_count, avg_confidence, supported, refuted, misleading
-
-        avg_confidence is Shantam's bias measure: a source that consistently
-        gives high-confidence verdicts about an entity is positively biased;
-        one that consistently gives low-confidence refutals is negatively biased.
-        """
+        """Return per-source claim stats for a given entity."""
         with self._driver.session() as session:
             result = session.run(
                 """
@@ -736,11 +768,7 @@ class GraphStore:
         correct_confidence: float,
         feedback_note: str = "",
     ) -> None:
-        """Override a verdict with human-corrected label and confidence.
-
-        Sets human_feedback=true and records corrected_at timestamp so the
-        override is traceable and doesn't get confused with AI-generated verdicts.
-        """
+        """Override a verdict with human-corrected label and confidence."""
         with self._driver.session() as session:
             session.run(
                 """

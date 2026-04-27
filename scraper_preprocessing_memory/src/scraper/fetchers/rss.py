@@ -1,7 +1,6 @@
 """RSS/Atom feed fetcher for high-credibility sources (BBC, Reuters, AP)."""
 
 import logging
-from datetime import datetime
 from email.utils import parsedate_to_datetime
 
 import feedparser

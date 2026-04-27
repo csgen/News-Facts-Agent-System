@@ -17,7 +17,6 @@ from fact_check_agent.src.tools.reranker import (
     rerank_candidates,
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def make_claim(claim_id, claim_text="test claim", verdict_label="supported",
@@ -195,6 +194,24 @@ def make_memory_mock_with_similar(claims=None):
     return memory
 
 
+def _make_settings(use_graph_rag=False, use_cross_encoder=False, top_k=5):
+    """Build a settings MagicMock with all guards explicitly set false.
+
+    MagicMock's default behaviour is to return a fresh MagicMock for any unset
+    attribute, and a MagicMock is truthy. That means `if settings.offline_mode:`
+    in query_memory short-circuits to True unless we set offline_mode=False
+    here, causing tests to fail with "expected call ... Called 0 times."
+    """
+    s = MagicMock()
+    s.use_graph_rag       = use_graph_rag
+    s.use_cross_encoder   = use_cross_encoder
+    s.cross_encoder_model = "" if not use_cross_encoder else "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    s.reranker_top_k      = top_k
+    s.offline_mode        = False
+    s.dry_run             = False
+    return s
+
+
 def make_fci(claim_id="clm_001", claim_text="vaccines cause autism"):
     from fact_check_agent.src.models.schemas import FactCheckInput
     return FactCheckInput(
@@ -213,11 +230,7 @@ def test_query_memory_graph_rag_disabled_no_graph_calls():
     from fact_check_agent.src.graph.nodes import query_memory
 
     memory   = make_memory_mock_with_similar()
-    settings = MagicMock()
-    settings.use_graph_rag    = False
-    settings.use_cross_encoder= False
-    settings.cross_encoder_model = ""
-    settings.reranker_top_k   = 5
+    settings = _make_settings(use_graph_rag=False)
 
     state = {"input": make_fci()}
     with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
@@ -241,11 +254,7 @@ def test_query_memory_graph_rag_enabled_calls_entity_expansion():
         make_claim("c2", "vaccines are safe", distance=0.0)
     ]
 
-    settings = MagicMock()
-    settings.use_graph_rag     = True
-    settings.use_cross_encoder = False
-    settings.cross_encoder_model = ""
-    settings.reranker_top_k    = 5
+    settings = _make_settings(use_graph_rag=True)
 
     state = {"input": make_fci()}
     with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
@@ -265,11 +274,7 @@ def test_query_memory_graph_rag_no_vector_results_skips_expansion():
     from fact_check_agent.src.graph.nodes import query_memory
 
     memory   = make_memory_mock_with_similar([])  # empty vector results
-    settings = MagicMock()
-    settings.use_graph_rag     = True
-    settings.use_cross_encoder = False
-    settings.cross_encoder_model = ""
-    settings.reranker_top_k    = 5
+    settings = _make_settings(use_graph_rag=True)
 
     state = {"input": make_fci()}
     with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
@@ -286,11 +291,7 @@ def test_query_memory_cross_encoder_called_when_flag_set():
     similar = [make_claim("c1"), make_claim("c2")]
     memory  = make_memory_mock_with_similar(similar)
 
-    settings = MagicMock()
-    settings.use_graph_rag     = False
-    settings.use_cross_encoder = True
-    settings.cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    settings.reranker_top_k    = 5
+    settings = _make_settings(use_cross_encoder=True)
 
     state = {"input": make_fci()}
     with patch("fact_check_agent.src.tools.reranker._load_cross_encoder") as mock_load, \
@@ -314,8 +315,25 @@ def _ensure_memory_agent_env():
     os.environ.setdefault("OPENAI_API_KEY",   "unused")
 
 
+def _stub_missing_modules():
+    """Stub heavy/unavailable deps so src.memory.agent can be imported in CI."""
+    import sys
+    from unittest.mock import MagicMock as _M
+    for mod in [
+        "google.genai", "rapidfuzz", "rapidfuzz.fuzz", "rapidfuzz.process",
+        "neo4j", "chromadb",
+    ]:
+        sys.modules.setdefault(mod, _M())
+    # google.genai must also be reachable as google_mod.genai
+    google_mod = sys.modules.get("google", _M())
+    if not hasattr(google_mod, "genai"):
+        google_mod.genai = sys.modules["google.genai"]
+        sys.modules["google"] = google_mod
+
+
 def _make_verdict(verdict_id="v_new", claim_id="clm_001", label="refuted"):
     _ensure_memory_agent_env()
+    _stub_missing_modules()
     import importlib
     Verdict = importlib.import_module("src.models.verdict").Verdict
     return Verdict(
@@ -324,7 +342,6 @@ def _make_verdict(verdict_id="v_new", claim_id="clm_001", label="refuted"):
         label=label,
         confidence=0.9,
         evidence_summary="evidence",
-        bias_score=0.2,
         image_mismatch=False,
         verified_at=datetime.now(timezone.utc),
     )
@@ -332,6 +349,7 @@ def _make_verdict(verdict_id="v_new", claim_id="clm_001", label="refuted"):
 
 def _get_add_verdict_fn():
     _ensure_memory_agent_env()
+    _stub_missing_modules()
     import importlib
     return importlib.import_module("src.memory.agent").MemoryAgent.add_verdict
 

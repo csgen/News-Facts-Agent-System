@@ -55,6 +55,7 @@ class VectorStore:
         source_id: str,
         status: str,
         extracted_at: str,
+        topic_text: str = "",
     ) -> None:
         self._claims.upsert(
             ids=[claim_id],
@@ -65,8 +66,13 @@ class VectorStore:
                 "source_id": source_id,
                 "status": status,
                 "extracted_at": extracted_at,
+                "topic_text": topic_text,
             }],
         )
+
+    def update_claim_status(self, claim_id: str, status: str) -> None:
+        """Patch the status metadata field on an existing claim — no re-embedding needed."""
+        self._claims.update(ids=[claim_id], metadatas=[{"status": status}])
 
     def search_similar_claims(
         self, query_embedding: list[float], top_k: int = 5
@@ -114,6 +120,16 @@ class VectorStore:
         )
         return len(results["ids"]) > 0
 
+    def get_article_id_by_content_hash(self, content_hash: str):
+        """Return the article_id for an existing content_hash, or None."""
+        results = self._articles.get(
+            where={"content_hash": content_hash},
+            limit=1,
+        )
+        if results["ids"]:
+            return results["ids"][0]
+        return None
+
     # ── Verdicts ────────────────────────────────────────────────────────
 
     def upsert_verdict(
@@ -124,7 +140,6 @@ class VectorStore:
         claim_id: str,
         label: str,
         confidence: float,
-        bias_score: float,
         image_mismatch: bool,
         verified_at: str,
     ) -> None:
@@ -136,14 +151,39 @@ class VectorStore:
                 "claim_id": claim_id,
                 "label": label,
                 "confidence": confidence,
-                "bias_score": bias_score,
                 "image_mismatch": image_mismatch,
                 "verified_at": verified_at,
+                "status": "active",
+            }],
+        )
+
+    def supersede_verdict(self, old_verdict_id: str, new_verdict_id: str) -> None:
+        """Mark an existing verdict as superseded by a newer one.
+
+        Only the listed metadata keys are modified; existing fields (label,
+        confidence, etc.) survive. Idempotent — calling twice with the same
+        old/new pair leaves the same end state.
+        """
+        self._verdicts.update(
+            ids=[old_verdict_id],
+            metadatas=[{
+                "status": "superseded",
+                "superseded_by": new_verdict_id,
             }],
         )
 
     def get_verdict_by_claim(self, claim_id: str) -> dict:
-        return self._verdicts.get(where={"claim_id": claim_id})
+        # Filter out superseded verdicts. The `$ne: "superseded"` clause matches
+        # both rows that explicitly say active and legacy rows written before
+        # the status field existed (where the field is absent).
+        return self._verdicts.get(
+            where={
+                "$and": [
+                    {"claim_id": claim_id},
+                    {"status": {"$ne": "superseded"}},
+                ]
+            }
+        )
 
     def update_verdict_metadata(self, verdict_id: str, label: str, confidence: float) -> None:
         """Patch label + confidence on an existing verdict in ChromaDB (human feedback)."""
@@ -234,12 +274,11 @@ class VectorStore:
         document: str,
         source_id: str,
         credibility: float,
-        bias: float,
         verdict_label: str,
         verdict_id: str,
         created_at: str,
     ) -> None:
-        """Append a (source, topic, credibility, bias) observation."""
+        """Append a (source, topic, credibility) observation."""
         self._source_credibility.upsert(
             ids=[point_id],
             embeddings=[embedding],
@@ -247,7 +286,6 @@ class VectorStore:
             metadatas=[{
                 "source_id": source_id,
                 "credibility": credibility,
-                "bias": bias,
                 "verdict_label": verdict_label,
                 "verdict_id": verdict_id,
                 "created_at": created_at,

@@ -14,11 +14,11 @@ import logging
 import pickle
 from pathlib import Path
 
-from fact_check_agent.src._bootstrap import *  # noqa: F401,F403
-from src.preprocessing.caption_generator import CaptionGenerator
 from src.config import settings as memory_settings
+from src.preprocessing.caption_generator import CaptionGenerator
 
 from fact_check_agent.benchmark.record import BenchmarkRecord, load_fakenewsnet_dataset
+from fact_check_agent.src._bootstrap import *  # noqa: F401,F403
 
 logger = logging.getLogger(__name__)
 

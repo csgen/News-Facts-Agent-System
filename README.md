@@ -170,7 +170,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml \
 
 ```
 news_facts_system/
-├── scraper_preprocessing_memory/   # Kleivn's repo (near-verbatim)
+├── scraper_preprocessing_memory/   # Kelvin's repo (near-verbatim)
 │   └── src/
 │       ├── pipeline.py             # `python -m src.pipeline` entry
 │       ├── memory/agent.py         # Unified MemoryAgent — the single DB facade
@@ -187,7 +187,7 @@ news_facts_system/
 │   ├── frontend/app.py             # Streamlit UI
 │   ├── agents/
 │   │   ├── fact_check_agent.py     # NEW adapter — wraps FakeNewsAgent's pipeline
-│   │   ├── memory_agent.py         # NEW adapter — re-exports scapper's MemoryAgent
+│   │   ├── memory_agent.py         # NEW adapter — re-exports scraper's MemoryAgent
 │   │   ├── entity_tracker.py       # Task 3 (unchanged)
 │   │   └── prediction_agent.py     # Task 3 (unchanged)
 │   └── evaluation/
@@ -227,9 +227,40 @@ news_facts_system/
                 │ ingest_preprocessed()
                 │
    ┌────────────────────────┐
-   │ scapper pipeline       │   one-shot, periodic or on-demand
+   │ scraper pipeline       │   one-shot, periodic or on-demand
    │ (RSS / Tavily / …)     │
    └────────────────────────┘
+```
+
+---
+
+## Public API for teammates: `decompose_input`
+
+`scraper_preprocessing_memory` exposes a single function teammates can call to
+push any user-supplied input (URL, article text, or short claim) into Neo4j +
+ChromaDB and get back the resulting `claim_id`s:
+
+```python
+from src.preprocessing.decompose import decompose_input
+
+claim_ids = decompose_input("Trump claims peace with Iran today.")
+claim_ids = decompose_input("https://www.bbc.com/news/articles/c62lp853214o")
+claim_ids = decompose_input(article_text_pasted_by_user)  # any length
+
+# → list[str], e.g. ["clm_a3f8b2c1", ...]
+```
+
+**Behaviour:**
+- **URL** → fetched as clean markdown via Jina Reader, then run through the same preprocessing pipeline as scraped articles.
+- **Article text** (≥500 chars or ≥2 sentences) → `gpt-4o-mini` infers / generates a title + body split, then full preprocessing.
+- **Short claim** → wrapped as a synthetic single-claim article so entity extraction still runs.
+- **Idempotent** — re-calling with the same input returns the same `claim_id`s (matched by content hash).
+- **Failure** — URLs that Jina cannot read raise `URLFetchError`; callers should catch and surface a clear message.
+
+Optional env vars (in `.env`):
+```
+JINA_READER_BASE_URL=https://r.jina.ai/   # default
+JINA_API_KEY=                              # leave blank for free tier; set for higher rate limits
 ```
 
 ---
@@ -245,3 +276,100 @@ news_facts_system/
   then `streamlit run frontend/app.py`.
 - **`scraper` writes nothing** — first run `init-db`, and confirm the `.env` API keys are non-empty.
 - **Disabling Langfuse** — the two flags `LANGFUSE_ENABLED` and `LANGFUSE_TRACING_ENABLED` gate only `FakeNewsAgent`'s Langfuse code; `scraper_preprocessing_memory` ignores them. To fully silence Langfuse for both modules, leave `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` blank in `.env`. With empty keys the SDK silently no-ops on every `@observe` and every `langfuse.openai` call.
+
+---
+
+## CI/CD (GitHub Actions)
+
+Two workflows live under `.github/workflows/`:
+
+### `ci.yml` — Lint + unit tests + coverage
+
+Runs on every push and PR to `main`, plus on manual trigger:
+- `lint` job: `ruff check .` (ruleset configured in `pyproject.toml`)
+- `test` job: installs deps + spaCy model, runs `pytest -m "not integration" --cov=...` (skips live-API tests, measures line coverage)
+
+Tests that hit OpenAI / Neo4j / Tavily either carry `@pytest.mark.skipif(not OPENAI_API_KEY, …)` (auto-skip in CI) or should be tagged `@pytest.mark.integration` (excluded from the default run).
+
+#### Test coverage
+
+Coverage runs as part of every CI test job and prints a per-file line-coverage table at the end of the test output:
+
+```
+---------- coverage: platform linux, python 3.12.x ----------
+Name                                                          Stmts   Miss  Cover
+---------------------------------------------------------------------------------
+scraper_preprocessing_memory/src/memory/agent.py                 142     38   73%
+scraper_preprocessing_memory/src/memory/vector_store.py           58     12   79%
+FakeNewsAgent/fact_check_agent/src/graph/nodes.py                206     91   56%
+PredictionAgent/agents/entity_tracker.py                          81     22   73%
+...
+```
+
+The XML report is uploaded as a workflow artifact (`coverage-xml`, 14-day retention) — download it from the Actions run page and open in any coverage viewer (or feed to codecov / coveralls if you ever set those up).
+
+To run coverage locally inside your container:
+
+```bash
+docker compose -f docker/docker-compose.yml run --rm shell
+pytest -m "not integration" \
+  --cov=scraper_preprocessing_memory/src \
+  --cov=FakeNewsAgent/fact_check_agent/src \
+  --cov=PredictionAgent/agents \
+  --cov-report=term-missing
+```
+
+`--cov-report=term-missing` prints uncovered line numbers next to each file — handy for spotting which branches need a test.
+
+For an HTML report you can browse:
+
+```bash
+pytest -m "not integration" --cov=PredictionAgent/agents --cov-report=html
+# then open htmlcov/index.html in a browser
+```
+
+### `scrape.yml` — Scheduled scraper
+
+Runs the scraper pipeline against cloud DBs every 6 hours (cron `0 */6 * * *`), and on manual trigger. Each run:
+1. Spins up an Ubuntu runner
+2. Installs deps + spaCy
+3. Runs `python -m src.pipeline` from `scraper_preprocessing_memory/`
+4. Articles + claims + captions land in your Aura + ChromaDB Cloud
+5. Runner exits — no state kept between runs
+
+The pipeline deduplicates by content hash, so missed runs / retries are safe.
+
+### Required GitHub Secrets
+
+In repo: **Settings → Secrets and variables → Actions → New repository secret**, add:
+
+| Secret | Required for | Notes |
+|---|---|---|
+| `OPENAI_API_KEY` | scrape | Claim isolation, entity extraction, GPT-4o vision |
+| `GOOGLE_API_KEY` | scrape | Gemini embeddings |
+| `TAVILY_API_KEY` | scrape | Live news search |
+| `NEO4J_URI` | scrape | e.g. `neo4j+s://xxxxxxxx.databases.neo4j.io` |
+| `NEO4J_USER` | scrape | Usually `neo4j` |
+| `NEO4J_PASSWORD` | scrape | Aura password |
+| `CHROMA_API_KEY` | scrape | ChromaDB Cloud key |
+| `CHROMA_TENANT` | scrape | ChromaDB Cloud tenant ID |
+| `CHROMA_DATABASE` | scrape | ChromaDB Cloud database name |
+| `TELEGRAM_SCRAPER_API_URL` | scrape (optional) | Only if using Telegram fetcher |
+| `TELEGRAM_SCRAPER_API_KEY` | scrape (optional) | |
+| `ENSEMBLEDATA_API_TOKEN` | scrape (optional) | Only if using Reddit/EnsembleData fetcher |
+| `LANGFUSE_PUBLIC_KEY` | scrape (optional) | Leave unset to disable Langfuse |
+| `LANGFUSE_SECRET_KEY` | scrape (optional) | |
+| `LANGFUSE_HOST` | scrape (optional) | e.g. `https://cloud.langfuse.com` |
+
+CI (`ci.yml`) needs **no secrets** — it runs against placeholder env vars.
+
+### Manual / one-off triggers
+
+From the GitHub UI: **Actions** tab → pick a workflow → **Run workflow**. Useful for:
+- Re-running the scraper out-of-cycle after pushing fetcher changes
+- Smoke-testing a workflow before relying on the cron
+
+### Cost/Frequency guardrails
+
+- To throttle: edit the cron in `.github/workflows/scrape.yml`, or lower `max_per_source` in `src/pipeline.py`'s `ScraperAgent.scrape(...)` call.
+- The 30-minute `timeout-minutes` cap stops a hung run from racking up runner-minutes.

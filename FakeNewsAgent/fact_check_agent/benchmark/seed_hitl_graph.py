@@ -11,8 +11,8 @@ Usage:
 import argparse
 import logging
 
-from fact_check_agent.src.memory_client import close_memory, get_memory
 from fact_check_agent.benchmark.record import BenchmarkRecord, load_liar_dataset
+from fact_check_agent.src.memory_client import close_memory, get_memory
 
 logger = logging.getLogger(__name__)
 

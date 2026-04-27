@@ -19,16 +19,14 @@ from typing import Optional
 
 import pandas as pd
 from pydantic import BaseModel, Field
-
-# ── Bootstrap memory_agent path ───────────────────────────────────────────────
-from fact_check_agent.src._bootstrap import *  # noqa: F401,F403
-
 from src.models.article import Article, Source
 from src.models.caption import ImageCaption
 from src.models.claim import Claim
 from src.models.pipeline import PreprocessingOutput
 
-from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput
+# ── Bootstrap memory_agent path ───────────────────────────────────────────────
+from fact_check_agent.src._bootstrap import *  # noqa: F401,F403
+from fact_check_agent.src.models.schemas import FactCheckInput
 
 logger = logging.getLogger(__name__)
 

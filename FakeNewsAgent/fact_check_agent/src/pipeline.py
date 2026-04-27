@@ -12,14 +12,13 @@ Usage:
     outputs = run_fact_check(preprocessing_output)
 """
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from src._bootstrap import *  # noqa: F401,F403
 from src.models.pipeline import PreprocessingOutput  # memory_agent model
 
-from fact_check_agent.src.memory_client import get_memory
 from fact_check_agent.src.graph.graph import build_graph
+from fact_check_agent.src.memory_client import get_memory
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
 
 logger = logging.getLogger(__name__)
@@ -92,17 +91,29 @@ def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
 
     results: list[FactCheckOutput] = []
     for i in range(len(output.claims)):
-        fact_check_input = claim_to_fact_check_input(output, i, image_caption, image_url)
-        logger.info(
-            "Running fact-check for claim %d/%d: %s",
-            i + 1, len(output.claims), fact_check_input.claim_id,
-        )
-        state = graph.invoke({"input": fact_check_input})
-        fc_output: Optional[FactCheckOutput] = state.get("output")
+        base_input = claim_to_fact_check_input(output, i, image_caption, image_url)
 
-        if fc_output:
-            results.append(fc_output)
-        else:
-            logger.error("Graph returned no output for claim %s", fact_check_input.claim_id)
+        # If preprocessing supplied sub-queries, run the full graph once per query.
+        # Each query is an independent fact-check written to memory separately.
+        # Otherwise fall back to single-claim mode (queries=[]).
+        queries_to_run = base_input.queries or [base_input.claim_text]
+
+        for j, query_text in enumerate(queries_to_run):
+            fact_check_input = base_input.model_copy(update={
+                "claim_text": query_text,
+                "claim_id":   f"{base_input.claim_id}_q{j}" if base_input.queries else base_input.claim_id,
+                "queries":    [],   # graph always receives a single claim
+            })
+            logger.info(
+                "Fact-check claim %d/%d query %d/%d: %s",
+                i + 1, len(output.claims), j + 1, len(queries_to_run), fact_check_input.claim_id,
+            )
+            state = graph.invoke({"input": fact_check_input})
+            fc_output: Optional[FactCheckOutput] = state.get("output")
+
+            if fc_output:
+                results.append(fc_output)
+            else:
+                logger.error("Graph returned no output for %s", fact_check_input.claim_id)
 
     return results

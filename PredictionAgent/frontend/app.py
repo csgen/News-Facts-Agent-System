@@ -5,18 +5,17 @@ Task 3: Full-Stack & Evaluation Engineer
 Run with: streamlit run frontend/app.py
 """
 
-import sys
 import os
+import sys
 
 # Ensure the project root is on sys.path so imports like `from agents...` work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import streamlit as st
-import plotly.graph_objects as go
-import pandas as pd
-import time
 import threading
-from datetime import datetime, timedelta, timezone
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG (must be first Streamlit call)
@@ -402,7 +401,6 @@ def get_real_verdict(query: str) -> dict:
             "confidence":       output.confidence_score / 100,
             "claim_text":       _display_claim,
             "evidence_summary": output.reasoning,
-            "bias_score":       output.bias_score,
             "image_mismatch":   output.cross_modal_flag,
             "image_url":        _image_url,
             "vlm_caption":      output.cross_modal_explanation or "",
@@ -419,7 +417,6 @@ def get_real_verdict(query: str) -> dict:
             "confidence":       0.0,
             "claim_text":       _display_claim,
             "evidence_summary": f"Pipeline error: {e}",
-            "bias_score":       0.5,
             "image_mismatch":   False,
             "image_url":        _image_url,
             "vlm_caption":      "",
@@ -585,6 +582,7 @@ def render_credibility_chart(df: pd.DataFrame, entity_name: str):
         height=300, margin=dict(l=10, r=10, t=50, b=10), hovermode="x unified"
     )
     return fig
+
 
 
 # ─────────────────────────────────────────────

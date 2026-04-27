@@ -1,4 +1,4 @@
-"""
+﻿"""
 Guardrail Benchmark — Input Guardrail Performance Evaluation
 
 Tests the two-layer input guardrail against:
@@ -18,9 +18,10 @@ Run:
     python -m evaluation.guardrail_benchmark
 """
 
-import sys
 import os
+import sys
 import time
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.input_guardrail import check_input
@@ -338,3 +339,4 @@ if __name__ == "__main__":
                         help="Run Layer A only (no LLM calls)")
     args = parser.parse_args()
     run_benchmark(use_llm=not args.no_llm)
+

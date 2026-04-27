@@ -21,7 +21,6 @@ from src.memory.embeddings import EmbeddingHelper
 from src.memory.entity_merger import EntityMerger
 from src.memory.graph_store import GraphStore
 from src.memory.vector_store import VectorStore
-from src.models.caption import ImageCaption
 from src.models.credibility import CredibilitySnapshot, Prediction
 from src.models.pipeline import PreprocessingOutput
 from src.models.verdict import Verdict
@@ -133,6 +132,7 @@ class MemoryAgent:
                 "claim_id": claim.claim_id,
                 "claim_text": claim.claim_text,
                 "claim_type": claim.claim_type or "",
+                "topic_text": claim.topic_text,
                 "extracted_at": claim.extracted_at.isoformat(),
                 "status": claim.status,
                 "entities": [
@@ -178,6 +178,7 @@ class MemoryAgent:
                 source_id=output.article.source_id,
                 status=claim.status,
                 extracted_at=claim.extracted_at.isoformat(),
+                topic_text=claim.topic_text,
             )
 
         # Image caption
@@ -200,7 +201,21 @@ class MemoryAgent:
     # ── Teammate Write Methods ──────────────────────────────────────────
 
     def add_verdict(self, verdict: Verdict) -> None:
-        """Write a fact-check verdict to both databases."""
+        """Write a fact-check verdict to both databases.
+
+        If an active verdict already exists for the same claim, mark it as
+        superseded before writing the new one. The full verdict history is
+        preserved in storage; only the latest active verdict is returned by
+        get_verdict_by_claim.
+        """
+        # ── Supersede prior active verdict, if any ─────────────────────
+        existing = self._vector.get_verdict_by_claim(verdict.claim_id)
+        if existing.get("ids"):
+            old_id = existing["ids"][0]
+            if old_id != verdict.verdict_id:  # idempotency guard
+                self._vector.supersede_verdict(old_id, verdict.verdict_id)
+                self._graph.supersede_verdict(old_id, verdict.verdict_id)
+
         # Get the claim text for combined embedding
         claim_results = self._vector.get_claims_by_ids([verdict.claim_id])
         claim_text = ""
@@ -217,7 +232,6 @@ class MemoryAgent:
             claim_id=verdict.claim_id,
             label=verdict.label,
             confidence=verdict.confidence,
-            bias_score=verdict.bias_score,
             image_mismatch=verdict.image_mismatch,
             verified_at=verdict.verified_at.isoformat(),
         )
@@ -228,7 +242,6 @@ class MemoryAgent:
             label=verdict.label,
             confidence=verdict.confidence,
             evidence_summary=verdict.evidence_summary,
-            bias_score=verdict.bias_score,
             image_mismatch=verdict.image_mismatch,
             verified_at=verdict.verified_at,
         )
@@ -284,6 +297,10 @@ class MemoryAgent:
 
     # ── Query Methods ───────────────────────────────────────────────────
 
+    def update_claim_status(self, claim_id: str, status: str) -> None:
+        """Update the status of an existing claim (e.g. 'pending' → 'verified')."""
+        self._vector.update_claim_status(claim_id, status)
+
     def search_similar_claims(
         self, text: str, top_k: int = 5
     ) -> dict:
@@ -294,6 +311,17 @@ class MemoryAgent:
     def check_duplicate(self, content_hash: str) -> bool:
         """Check if an article with this hash already exists."""
         return self._vector.check_content_hash_exists(content_hash)
+
+    def find_existing_claim_ids(self, content_hash: str) -> list[str]:
+        """Return claim_ids of an article matching this content_hash, or [].
+
+        Used by `decompose_input` to keep the public API idempotent: re-submitting
+        the same query returns the same claim_ids instead of creating duplicates.
+        """
+        article_id = self._vector.get_article_id_by_content_hash(content_hash)
+        if not article_id:
+            return []
+        return self._graph.get_claim_ids_for_article(article_id)
 
     def get_claims_by_ids(self, ids: list[str]) -> dict:
         return self._vector.get_claims_by_ids(ids)
@@ -339,8 +367,90 @@ class MemoryAgent:
         entity_id = self._graph.ensure_entity_exists(name)
         return self._graph.backfill_mentions_for_entity(entity_id, name)
 
-    def get_entity_by_name(self, name: str) -> Optional[dict]:
-        return self._graph.get_entity_by_name(name)
+    def get_entity_by_name(
+        self,
+        name: str,
+        fuzzy_threshold: int = 85,
+    ) -> Optional[dict]:
+        """Look up an Entity node by name with alias-aware multi-tier resolution.
+
+        Tier 1 — exact case-insensitive match on Entity.name in Neo4j.
+        Tier 2 — canonical alias resolution via data/canonical_entities.json
+                 (e.g. "USA" → "United States", "DPRK" → "North Korea").
+        Tier 3 — fuzzy string match across all Entity.name values using
+                 rapidfuzz.token_sort_ratio with a configurable threshold
+                 (default 85 — same threshold used by EntityMerger).
+
+        Returns the matched entity dict (same shape as graph.get_entity_by_name)
+        or None if no tier produces a match.
+
+        Backward-compatible: callers that pass only `name` see strictly more
+        matches than before; an exact match (Tier 1) returns immediately, so
+        existing well-formed inputs incur zero extra cost.
+
+        Notes
+        -----
+        - Names shorter than 3 chars skip Tier 3 (too short for reliable fuzzy
+          matching — would generate many false positives).
+        - Tier 3 fetches all Entity nodes from Neo4j once per call. For very
+          large graphs (10k+ entities) consider caching upstream.
+        """
+        if not name or not name.strip():
+            return None
+
+        # Tier 1: exact case-insensitive match
+        result = self._graph.get_entity_by_name(name)
+        if result:
+            return result
+
+        # Tier 2: canonical alias resolution (no entity_type known at query time)
+        from src.preprocessing.canonical_names import canonicalize_any_type
+        canonical = canonicalize_any_type(name)
+        if canonical and canonical.lower() != name.strip().lower():
+            result = self._graph.get_entity_by_name(canonical)
+            if result:
+                logger.info("get_entity_by_name: aliased '%s' → '%s'", name, canonical)
+                return result
+
+        # Tier 3: fuzzy match against all entity names
+        if len(name.strip()) < 3:
+            return None
+
+        try:
+            from rapidfuzz import fuzz, process
+        except ImportError:
+            logger.warning("rapidfuzz not available; skipping fuzzy entity lookup")
+            return None
+
+        all_entities = self._graph.get_all_entities()
+        if not all_entities:
+            return None
+
+        # Build name → entity map. Multiple entities may share the same name
+        # (rare after EntityMerger runs); we keep the one with the most claims.
+        name_to_entity: dict[str, dict] = {}
+        for e in all_entities:
+            existing = name_to_entity.get(e["name"])
+            if existing is None or (e.get("total_claims", 0) >
+                                    existing.get("total_claims", 0)):
+                name_to_entity[e["name"]] = e
+
+        match = process.extractOne(
+            name.strip(),
+            list(name_to_entity.keys()),
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=fuzzy_threshold,
+        )
+        if match is None:
+            return None
+
+        matched_name, score, _ = match
+        result = name_to_entity[matched_name]
+        logger.info(
+            "get_entity_by_name: fuzzy '%s' → '%s' (score=%.0f)",
+            name, matched_name, score,
+        )
+        return result
 
     def get_claim_count_for_entity(self, entity_id: str, since: datetime) -> int:
         return self._graph.get_claim_count_for_entity(entity_id, since)
@@ -430,12 +540,11 @@ class MemoryAgent:
         topic_text: str,
         source_id: str,
         credibility: float,
-        bias: float,
         verdict_label: str,
         verdict_id: str,
         created_at: str,
     ) -> None:
-        """Append one (source, topic, credibility, bias) observation."""
+        """Append one (source, topic, credibility) observation."""
         embedding = self._embeddings.embed(topic_text)
         self._vector.upsert_source_credibility_point(
             point_id=point_id,
@@ -443,7 +552,6 @@ class MemoryAgent:
             document=topic_text,
             source_id=source_id,
             credibility=credibility,
-            bias=bias,
             verdict_label=verdict_label,
             verdict_id=verdict_id,
             created_at=created_at,
