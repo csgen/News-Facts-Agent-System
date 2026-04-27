@@ -5,9 +5,12 @@ Task 3: Full-Stack & Evaluation Engineer
 Run with: streamlit run frontend/app.py
 """
 
+import hashlib
+import logging
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 # Ensure the project root is on sys.path so imports like `from agents...` work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,6 +20,66 @@ import threading
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+# ─────────────────────────────────────────────
+# SECOPS — LOGGING SETUP
+# ─────────────────────────────────────────────
+_LOG_DIR = Path(__file__).parent.parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+
+_guardrail_log = logging.getLogger("guardrail.blocked")
+_guardrail_handler = logging.FileHandler(_LOG_DIR / "guardrail_blocked.log")
+_guardrail_handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
+_guardrail_log.addHandler(_guardrail_handler)
+_guardrail_log.setLevel(logging.WARNING)
+
+_hitl_log = logging.getLogger("hitl.audit")
+_hitl_handler = logging.FileHandler(_LOG_DIR / "hitl_audit.log")
+_hitl_handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
+_hitl_log.addHandler(_hitl_handler)
+_hitl_log.setLevel(logging.INFO)
+
+
+# ── Rate limiter ──────────────────────────────
+_RATE_LIMIT = 10  # max claims per session
+
+
+def _check_rate_limit() -> bool:
+    """Return True if the user is within the rate limit, False if exceeded."""
+    if "_request_count" not in st.session_state:
+        st.session_state["_request_count"] = 0
+    return st.session_state["_request_count"] < _RATE_LIMIT
+
+
+def _increment_rate_counter() -> None:
+    st.session_state["_request_count"] = st.session_state.get("_request_count", 0) + 1
+
+
+# ── Output schema validator ───────────────────
+_VALID_LABELS = {"supported", "misleading", "refuted"}
+
+
+def _validate_verdict(result: dict) -> tuple[bool, str]:
+    """Validate verdict dict against expected schema.
+
+    Returns (is_valid, error_message).
+    Checks: required keys present, label is one of the 3 valid values,
+    confidence is a float in [0, 1].
+    """
+    required = {"verdict_id", "label", "confidence", "claim_text", "evidence_summary"}
+    missing = required - result.keys()
+    if missing:
+        return False, f"Missing fields: {missing}"
+    if result["label"] not in _VALID_LABELS:
+        return False, f"Invalid label '{result['label']}' — must be one of {_VALID_LABELS}"
+    try:
+        conf = float(result["confidence"])
+        if not 0.0 <= conf <= 1.0:
+            return False, f"Confidence {conf} out of range [0, 1]"
+    except (TypeError, ValueError):
+        return False, f"Confidence is not a number: {result['confidence']}"
+    return True, ""
+
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG (must be first Streamlit call)
@@ -769,11 +832,25 @@ st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 # RESULTS (shown after clicking VERIFY)
 # ─────────────────────────────────────────────
 if run_btn and user_input.strip():
+    # ── SecOps: Rate Limiting ─────────────────────────────────────────────
+    if not _check_rate_limit():
+        st.error(
+            f"⚠️ **Rate limit reached** — you have submitted {_RATE_LIMIT} claims this session. "
+            "Please refresh the page to start a new session."
+        )
+        st.stop()
+
     # ── Layer A + B Input Guardrail — runs BEFORE the pipeline ───────────
     try:
         from agents.input_guardrail import check_input
         _guard = check_input(user_input)
         if _guard["blocked"]:
+            # SecOps: log blocked input (hashed for privacy)
+            _input_hash = hashlib.sha256(user_input.encode()).hexdigest()[:16]
+            _guardrail_log.warning(
+                "BLOCKED | hash=%s | layer=%s | risk=%s | reason=%s",
+                _input_hash, _guard["layer"], _guard["risk"], _guard["reason"],
+            )
             st.error(
                 f"⚠️ **Input blocked** [{_guard['risk']} risk]\n\n"
                 f"{_guard['reason']}\n\n"
@@ -783,8 +860,22 @@ if run_btn and user_input.strip():
     except Exception as _ge:
         pass  # guardrail failure never blocks the pipeline
 
+    # ── Increment rate counter AFTER guardrail passes ────────────────────
+    _increment_rate_counter()
+
     with st.spinner("🔍 Agents working: Scraping → Preprocessing → Fact-Checking..."):
         result = get_real_verdict(user_input)
+
+    # ── SecOps: Output Schema Validation ─────────────────────────────────
+    _valid, _err = _validate_verdict(result)
+    if not _valid:
+        logging.warning("[schema] Invalid verdict returned: %s — %s", result, _err)
+        result["label"]      = "misleading"
+        result["confidence"] = 0.0
+        result["evidence_summary"] = (
+            f"[Schema validation failed: {_err}] "
+            + result.get("evidence_summary", "")
+        )
 
     # ── Persist result so widget interactions (slider, radio) don't wipe it ──
     st.session_state["_last_result"]       = result
@@ -1025,6 +1116,8 @@ if _cached_result and (run_btn or not run_btn):
                         mem = _get_memory()
                         if mem:
                             _correct_conf = fb_conf / 100
+                            _old_label    = result.get("label", "unknown")
+                            _old_conf     = result.get("confidence", 0.0)
 
                             # 1. Patch the verdict in Neo4j + ChromaDB
                             mem.update_verdict_with_feedback(
@@ -1032,6 +1125,15 @@ if _cached_result and (run_btn or not run_btn):
                                 correct_label=fb_label,
                                 correct_confidence=_correct_conf,
                                 feedback_note=fb_note,
+                            )
+
+                            # SecOps: HITL audit log
+                            _hitl_log.info(
+                                "CORRECTION | verdict_id=%s | old_label=%s | new_label=%s "
+                                "| old_conf=%.2f | new_conf=%.2f | note=%s",
+                                _verdict_id, _old_label, fb_label,
+                                _old_conf, _correct_conf,
+                                fb_note.replace("\n", " ") if fb_note else "",
                             )
 
                             # 2. Log a source credibility observation so the

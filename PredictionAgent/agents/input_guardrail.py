@@ -23,11 +23,23 @@ Returns:
     }
 """
 
+import hashlib
 import logging
 import re
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# ── SecOps: append-only blocked-input log ────
+_log_dir = Path(__file__).parent.parent / "logs"
+_log_dir.mkdir(exist_ok=True)
+_blocked_logger = logging.getLogger("guardrail.agent.blocked")
+if not _blocked_logger.handlers:
+    _fh = logging.FileHandler(_log_dir / "guardrail_blocked.log")
+    _fh.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
+    _blocked_logger.addHandler(_fh)
+_blocked_logger.setLevel(logging.WARNING)
 
 # ─────────────────────────────────────────────
 # LAYER A — RULE-BASED PATTERNS
@@ -263,9 +275,20 @@ def check_input(text: str) -> dict:
     # Layer A — fast rule-based
     result_a = layer_a_check(text)
     if result_a["blocked"]:
+        _input_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+        _blocked_logger.warning(
+            "BLOCKED | hash=%s | layer=%s | risk=%s | reason=%s",
+            _input_hash, result_a["layer"], result_a["risk"], result_a["reason"],
+        )
         return result_a
 
     # Layer B — LLM classifier (only if A passed)
     result_b = layer_b_check(text)
+    if result_b["blocked"]:
+        _input_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+        _blocked_logger.warning(
+            "BLOCKED | hash=%s | layer=%s | risk=%s | reason=%s",
+            _input_hash, result_b["layer"], result_b["risk"], result_b["reason"],
+        )
     return result_b
 
