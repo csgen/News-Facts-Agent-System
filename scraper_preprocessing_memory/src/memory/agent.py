@@ -556,21 +556,3 @@ class MemoryAgent:
         """Write (or update) the HAS_CREDIBILITY relationship in Neo4j."""
         self._graph.upsert_source_topic_credibility(source_id, topic, credibility)
 
-    def get_base_credibility(self, source_id: str) -> Optional[float]:
-        """Return static base_credibility for a Source node, or None if unknown."""
-        return self._graph.get_base_credibility(source_id)
-
-    def get_topic_for_verdict(self, verdict_id: str) -> str:
-        """Return the topic_text of the Claim linked to this Verdict, or '' if not found."""
-        return self._graph.get_topic_for_verdict(verdict_id)
-
-    def get_source_topic_credibility(self, source_id: str, topic: str) -> Optional[float]:
-        """Return current dynamic credibility for (source, topic), or None if no record."""
-        return self._graph.get_source_topic_credibility(source_id, topic)
-
-    def upsert_source_topic_credibility(
-        self, source_id: str, topic: str, credibility: float
-    ) -> None:
-        """Write (or update) the HAS_CREDIBILITY relationship in Neo4j."""
-        self._graph.upsert_source_topic_credibility(source_id, topic, credibility)
-
