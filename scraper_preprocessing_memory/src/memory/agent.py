@@ -556,34 +556,21 @@ class MemoryAgent:
         """Write (or update) the HAS_CREDIBILITY relationship in Neo4j."""
         self._graph.upsert_source_topic_credibility(source_id, topic, credibility)
 
-    def add_source_credibility_point(
-        self,
-        point_id: str,
-        claim_text: str,
-        topic_text: str,
-        source_id: str,
-        credibility: float,
-        verdict_label: str,
-        verdict_id: str,
-        created_at: str,
-    ) -> None:
-        """Append one (source, topic, credibility) observation from HITL feedback."""
-        embedding = self._embeddings.embed(topic_text)
-        self._vector.upsert_source_credibility_point(
-            point_id=point_id,
-            embedding=embedding,
-            document=topic_text,
-            source_id=source_id,
-            credibility=credibility,
-            verdict_label=verdict_label,
-            verdict_id=verdict_id,
-            created_at=created_at,
-        )
+    def get_base_credibility(self, source_id: str) -> Optional[float]:
+        """Return static base_credibility for a Source node, or None if unknown."""
+        return self._graph.get_base_credibility(source_id)
 
-    def query_source_credibility(
-        self, claim_text: str, source_id: str, k: int = 20
-    ) -> dict:
-        """Retrieve k nearest (source, topic) credibility observations."""
-        embedding = self._embeddings.embed(claim_text)
-        return self._vector.query_source_credibility(embedding, source_id=source_id, k=k)
+    def get_topic_for_verdict(self, verdict_id: str) -> str:
+        """Return the topic_text of the Claim linked to this Verdict, or '' if not found."""
+        return self._graph.get_topic_for_verdict(verdict_id)
+
+    def get_source_topic_credibility(self, source_id: str, topic: str) -> Optional[float]:
+        """Return current dynamic credibility for (source, topic), or None if no record."""
+        return self._graph.get_source_topic_credibility(source_id, topic)
+
+    def upsert_source_topic_credibility(
+        self, source_id: str, topic: str, credibility: float
+    ) -> None:
+        """Write (or update) the HAS_CREDIBILITY relationship in Neo4j."""
+        self._graph.upsert_source_topic_credibility(source_id, topic, credibility)
 

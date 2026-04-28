@@ -14,10 +14,12 @@ Usage:
 import logging
 from typing import Optional
 
+from langfuse.decorators import observe
 from src._bootstrap import *  # noqa: F401,F403
 from src.models.pipeline import PreprocessingOutput  # memory_agent model
 
 from fact_check_agent.src.graph.graph import build_graph
+from fact_check_agent.src.llm_factory import get_langfuse_handler
 from fact_check_agent.src.memory_client import get_memory
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
 
@@ -69,6 +71,7 @@ def claim_to_fact_check_input(
     )
 
 
+@observe(name="fact_check_pipeline")
 def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
     """Run the fact-check graph on every claim in a PreprocessingOutput.
 
@@ -108,7 +111,9 @@ def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
                 "Fact-check claim %d/%d query %d/%d: %s",
                 i + 1, len(output.claims), j + 1, len(queries_to_run), fact_check_input.claim_id,
             )
-            state = graph.invoke({"input": fact_check_input})
+            lf_handler = get_langfuse_handler()
+            invoke_cfg = {"callbacks": [lf_handler]} if lf_handler else {}
+            state = graph.invoke({"input": fact_check_input}, config=invoke_cfg)
             fc_output: Optional[FactCheckOutput] = state.get("output")
 
             if fc_output:

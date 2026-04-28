@@ -1,6 +1,7 @@
 """End-to-end pipeline: Scraper → Preprocessing → Memory Agent."""
 
 import logging
+import time
 
 from src.config import settings
 from src.memory.agent import MemoryAgent
@@ -48,6 +49,22 @@ def run_pipeline(max_per_source: int = 20) -> dict:
                 failed += 1
 
         # Step 3: Entity reconciliation (cluster variants → merge)
+        # ── Quota-window cooldown ────────────────────────────────────────
+        # Article ingest just consumed a chunk of Gemini's free-tier 100 RPM
+        # quota (each text inside a batch counts as a separate quota unit
+        # against `embed_content_free_tier_requests`). Reconcile then bursts
+        # several `embed_batch` calls back-to-back (one per entity_type) — if
+        # the rolling 60s window isn't drained first, we reliably trip 429.
+        # 60 s gives the window time to fully clear before reconcile starts.
+        # Safe on cron / GitHub Actions (no idle-killer; default job timeout
+        # is 6 h).
+        _RECONCILE_COOLDOWN_S = 60
+        logger.info(
+            "Sleeping %ds before entity reconciliation to drain the Gemini quota window...",
+            _RECONCILE_COOLDOWN_S,
+        )
+        time.sleep(_RECONCILE_COOLDOWN_S)
+
         try:
             reconcile_summary = memory.reconcile_entities()
         except Exception as e:

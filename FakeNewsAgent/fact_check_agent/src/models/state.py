@@ -33,6 +33,9 @@ class FactCheckState(TypedDict):
     # ── Multi-agent debate ────────────────────────────────────────────────────
     debate_transcript: Optional[str]
 
+    # ── VLM image assessment (feeds into Judge prompt) ────────────────────────
+    vlm_assessment_block: Optional[str]
+
     # ── Source credibility (from Reflection Agent) ────────────────────────────
     source_credibility: Optional[dict]
 
@@ -41,7 +44,7 @@ class FactCheckState(TypedDict):
 
     # ── Cross-modal ───────────────────────────────────────────────────────────
     cross_modal_flag: bool
-    cross_modal_explanation: Optional[str]
+    vlm_assessment_block: Optional[str]
     clip_similarity_score: Optional[float]
 
     # ── Final output ──────────────────────────────────────────────────────────
@@ -59,10 +62,10 @@ INITIAL_STATE: dict = {
     "neutral_degrees":         [],
     "neutral_reasoning":       None,
     "debate_transcript":       None,
+    "vlm_assessment_block":    None,
     "source_credibility":      None,
     "effective_topic":         "",
     "cross_modal_flag":        False,
-    "cross_modal_explanation": None,
     "clip_similarity_score":   None,
     "output":                  None,
 }

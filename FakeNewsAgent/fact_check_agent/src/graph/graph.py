@@ -25,6 +25,7 @@ from fact_check_agent.src.graph.nodes import (
     query_memory,
     receive_claim,
     synthesize_verdict,
+    vlm_assessment_node,
     write_memory,
 )
 from fact_check_agent.src.graph.router import debate_check
@@ -84,6 +85,7 @@ def build_graph(memory: "MemoryAgent"):
     _query_memory            = _timed("query_memory",            lambda s: query_memory(s, memory, settings))
     _freshness_check_all     = _timed("freshness_check_all",     lambda s: freshness_check_all(s, settings))
     _context_claim_agent     = _timed("context_claim_agent",     lambda s: context_claim_agent_node(s, memory, settings))
+    _vlm_assessment          = _timed("vlm_assessment",          lambda s: vlm_assessment_node(s, settings))
     _synthesize_verdict      = _timed("synthesize_verdict",      lambda s: synthesize_verdict(s, settings))
     _multi_agent_debate      = _timed("multi_agent_debate",      lambda s: multi_agent_debate(s, settings))
     _cross_modal_check       = _timed("cross_modal_check",       lambda s: cross_modal_check(s, settings))
@@ -98,6 +100,7 @@ def build_graph(memory: "MemoryAgent"):
     g.add_node("query_memory",         _query_memory)
     g.add_node("freshness_check_all",  _freshness_check_all)
     g.add_node("context_claim_agent",  _context_claim_agent)
+    g.add_node("vlm_assessment",       _vlm_assessment)
     g.add_node("synthesize_verdict",   _synthesize_verdict)
     g.add_node("multi_agent_debate",   _multi_agent_debate)
     g.add_node("cross_modal_check",    _cross_modal_check)
@@ -109,7 +112,8 @@ def build_graph(memory: "MemoryAgent"):
     g.add_edge("receive_claim",       "query_memory")
     g.add_edge("query_memory",        "freshness_check_all")
     g.add_edge("freshness_check_all", "context_claim_agent")
-    g.add_edge("context_claim_agent", "synthesize_verdict")
+    g.add_edge("context_claim_agent", "vlm_assessment")
+    g.add_edge("vlm_assessment",      "synthesize_verdict")
 
     # S4: Debate check — routes low-confidence verdicts through advocate/arbiter loop
     g.add_conditional_edges("synthesize_verdict", debate_check, {

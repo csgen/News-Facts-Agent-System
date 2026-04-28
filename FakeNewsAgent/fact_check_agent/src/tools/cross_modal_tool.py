@@ -213,11 +213,11 @@ def _vision_check(claim_text: str, image_url: str) -> Optional[dict]:
     if image_data_uri is None:
         return None
 
-    client = OpenAI(base_url=settings.ollama_base_url, api_key="ollama")
+    client = _llm_factory.make_vlm_client()
     prompt = CROSS_MODAL_VISION_PROMPT.format(claim_text=claim_text)
     try:
         response = client.chat.completions.create(
-            model=settings.ollama_llm_model,
+            model=_llm_factory.vlm_model_name(),
             messages=[{
                 "role": "user",
                 "content": [

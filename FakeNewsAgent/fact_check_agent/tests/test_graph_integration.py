@@ -180,7 +180,8 @@ def test_graph_cross_modal_flag_propagated():
 
     output = state["output"]
     assert output.cross_modal_flag is True
-    assert output.cross_modal_explanation is not None
+    # vlm_assessment_block only populated when image_url is present; this test has none
+    assert output.vlm_assessment_block is None
 
 
 # ── receive_claim node ────────────────────────────────────────────────────────

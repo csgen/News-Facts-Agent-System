@@ -47,7 +47,8 @@ class Settings(BaseSettings):
 
     # Ollama settings (only used when *_provider = "ollama")
     ollama_base_url: str = "http://localhost:11434/v1"
-    ollama_llm_model: str = "gemma4:e2b"
+    ollama_api_key: str = ""               # leave blank for local Ollama; set for Ollama Cloud
+    ollama_llm_model: str = "gemma4:31b-cloud"
     ollama_embedding_model: str = "nomic-embed-text"
     ollama_vlm_model: str = ""             # vision-language model for caption generation; leave blank to skip
 
@@ -83,6 +84,12 @@ class Settings(BaseSettings):
     langchain_tracing_v2: bool = False
     langchain_api_key: str = ""
     langchain_project: str = "fakenews-factcheck"
+
+    # Langfuse observability
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "https://us.cloud.langfuse.com"
+    langfuse_enabled: bool = False
 
 
 settings = Settings()

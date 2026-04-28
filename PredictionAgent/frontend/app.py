@@ -408,6 +408,7 @@ def get_real_verdict(query: str) -> dict:
     sub_claims: list[dict] = []
     _mem_for_text = _get_memory()
     claim_text_by_id: dict[str, str] = {}
+    claim_image_by_id: dict[str, tuple[str, str]] = {}  # claim_id -> (image_url, preprocessing_caption)
     if _mem_for_text:
         try:
             r = _mem_for_text.get_claims_by_ids(claim_ids) or {}
@@ -418,7 +419,26 @@ def get_real_verdict(query: str) -> dict:
         except Exception:
             pass
 
+        # Load article-level image URL + preprocessing VLM caption for each claim
+        for v in verdicts:
+            try:
+                article_id = getattr(v, "article_id", "") or ""
+                if article_id:
+                    cap_result = _mem_for_text.get_caption_by_article(article_id) or {}
+                    cap_docs = cap_result.get("documents") or []
+                    cap_metas = cap_result.get("metadatas") or []
+                    img_url = ""
+                    prep_caption = ""
+                    if cap_metas and cap_metas[0]:
+                        img_url = cap_metas[0].get("image_url", "") or ""
+                    if cap_docs:
+                        prep_caption = cap_docs[0] or ""
+                    claim_image_by_id[v.claim_id] = (img_url, prep_caption)
+            except Exception:
+                claim_image_by_id[v.claim_id] = ("", "")
+
     for v in verdicts:
+        img_url, prep_caption = claim_image_by_id.get(v.claim_id, ("", ""))
         sub_claims.append({
             "verdict_id":       v.verdict_id,
             "claim_id":         v.claim_id,
@@ -427,7 +447,9 @@ def get_real_verdict(query: str) -> dict:
             "claim_text":       claim_text_by_id.get(v.claim_id, ""),
             "evidence_summary": v.reasoning,
             "image_mismatch":   getattr(v, "cross_modal_flag", False),
-            "vlm_caption":      getattr(v, "cross_modal_explanation", "") or "",
+            "vlm_caption":      getattr(v, "vlm_assessment_block", "") or "",
+            "preprocessing_caption": prep_caption,
+            "image_url":        img_url,
             "sources":          _sources_from_evidence_links(getattr(v, "evidence_links", None) or []),
         })
 
@@ -458,8 +480,8 @@ def get_real_verdict(query: str) -> dict:
         "claim_text":       _display_claim,
         "evidence_summary": headline_summary,
         "image_mismatch":   any(sc["image_mismatch"] for sc in sub_claims),
-        "image_url":        "",  # populated below if any caption exists
-        "vlm_caption":      headline["vlm_caption"],
+        "image_url":        headline.get("image_url", ""),
+        "vlm_caption":      headline.get("preprocessing_caption", headline["vlm_caption"]),
         "sources":          headline["sources"],
         "charged_phrases":  [],
         "claims":           sub_claims,
@@ -1003,50 +1025,44 @@ if _cached_result and (run_btn or not run_btn):
             st.plotly_chart(render_confidence_gauge(result["confidence"], label),
                             use_container_width=True, config={"displayModeBar": False})
 
-            st.markdown('<div class="section-header" style="margin-top:0.5rem">Image Cross-Check</div>', unsafe_allow_html=True)
-            _vlm_caption = (result.get("vlm_caption") or "").strip()
+            st.markdown('<div class="section-header" style="margin-top:0.5rem">Image Assessment</div>', unsafe_allow_html=True)
+            _vlm_block = (result.get("vlm_caption") or "").strip()
             _image_url   = (result.get("image_url") or "").strip()
 
             if result["image_mismatch"]:
-                explanation = _vlm_caption or "The article image does not match the described event context."
+                _vlm_html = _vlm_block.replace(chr(10), '<br>') if _vlm_block else "The article image does not match the described event context."
                 st.markdown(f"""
                 <div class="img-mismatch-warning">
                     ⚠️ <strong>Image Mismatch Detected</strong><br>
-                    <span style="font-size:0.82rem;">{explanation}</span>
+                    <span style="font-size:0.82rem;">{_vlm_html}</span>
                 </div>
                 """, unsafe_allow_html=True)
             elif _image_url:
-                # Image was scraped — check if vision model ran
-                if _vlm_caption:
+                if _vlm_block:
+                    _vlm_html = _vlm_block.replace(chr(10), '<br>')
                     st.markdown(f"""
                     <div class="img-match-ok">
-                        ✓ <strong>Image Consistent</strong><br>
+                        ✓ <strong>Image Assessment</strong><br>
                         <span style="font-size:0.82rem; color:#94a3b8; font-style:italic;">
-                            What the image shows:<br>{_vlm_caption}
+                            {_vlm_html}
                         </span>
                     </div>
                     """, unsafe_allow_html=True)
                 else:
-                    # Image found but USE_CROSS_MODAL=false — show image, note vision check is off
                     st.markdown("""
                     <div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.25);
                                 border-radius:10px; padding:0.8rem 1rem; font-size:0.82rem; color:#94a3b8;">
                         🖼️ <strong style="color:#38bdf8;">Article image found</strong><br>
-                        Vision cross-check is disabled (<code>USE_CROSS_MODAL=false</code>).
-                        Enable it in <code>.env</code> to get an AI description of this image and verify it matches the claim.
+                        Vision assessment is disabled or not available.
                     </div>
                     """, unsafe_allow_html=True)
-                st.image(_image_url,
-                         caption=f"VLM Caption: {_vlm_caption}" if _vlm_caption else "Article image (vision analysis disabled)",
-                         use_container_width=True)
+                st.image(_image_url, use_container_width=True)
             else:
-                # No image URL was present in this claim/article
                 st.markdown("""
                 <div style="background:rgba(71,85,105,0.15); border:1px solid rgba(71,85,105,0.3);
                             border-radius:10px; padding:0.8rem 1rem; font-size:0.82rem; color:#64748b;">
                     🖼️ <strong style="color:#94a3b8;">No image detected</strong><br>
-                    No image was found in this article — cross-check was skipped.
-                    Image analysis runs automatically when an article image is present.
+                    No image was found in this article — image assessment was skipped.
                 </div>
                 """, unsafe_allow_html=True)
 

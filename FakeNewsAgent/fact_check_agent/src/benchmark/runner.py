@@ -661,7 +661,7 @@ def run_benchmark(
             "pred_verdict":       pred_verdict,
             "confidence_score":   confidence,
             "cross_modal_flag":   cross_modal_flag,
-            "cross_modal_explanation": cross_modal_exp,
+            "vlm_assessment_block": cross_modal_exp,
             "correct":            pred_verdict == true_verdict if pred_verdict else False,
             "reasoning":          reasoning[:300] if reasoning else None,
             "has_claim_image":    bool(str(row.get("claim_image", "")).strip() not in ("", "nan")),

@@ -58,7 +58,7 @@ class FactCheckOutput(BaseModel):
     evidence_links: list[str]         # source URLs supporting the verdict
     reasoning: str                    # chain-of-thought explanation
     cross_modal_flag: bool = False
-    cross_modal_explanation: Optional[str] = None  # one sentence; None if no image or no conflict
+    vlm_assessment_block: Optional[str] = None     # full VLM image claim assessment (caption, visual evidence, score, explanation)
     last_verified_at: Optional[datetime] = None    # verified_at of the most recent fresh memory match
 
 

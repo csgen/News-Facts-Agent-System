@@ -21,6 +21,7 @@ from fact_check_agent.src.models.schemas import (
 )
 from fact_check_agent.src.models.state import FactCheckState
 from fact_check_agent.src.prompts import (
+    IMAGE_CLAIM_ASSESSOR_PROMPT,
     JUDGE_PROMPT,
     SKEPTIC_PROMPT,
     SUPPORTER_PROMPT,
@@ -50,9 +51,9 @@ def receive_claim(state: FactCheckState) -> dict:
         "context_claims":          [],
         "retrieved_chunks":        list(inp.prefetched_chunks),
         "debate_transcript":       None,
+        "vlm_assessment_block":    None,
         "source_credibility":      None,
         "cross_modal_flag":        False,
-        "cross_modal_explanation": None,
         "clip_similarity_score":   None,
         "output":                  None,
     }
@@ -280,6 +281,69 @@ def context_claim_agent_node(state: FactCheckState, memory: "MemoryAgent", setti
     return {"context_claims": filtered}
 
 
+# ── Node: vlm_assessment ─────────────────────────────────────────────────────
+
+def vlm_assessment_node(state: FactCheckState, settings) -> dict:
+    """Run VLM visual assessment — generates vlm_assessment_block for the Judge.
+
+    Calls IMAGE_CLAIM_ASSESSOR_PROMPT (v2.1) via the configured vision-capable
+    model (GPT-4o for OpenAI; ollama_llm_model for Ollama with vision support).
+    Returns "No image available." when no image_url is present or on any failure.
+    """
+    inp = state["input"]
+    image_url = getattr(inp, "image_url", None)
+    if not image_url:
+        return {"vlm_assessment_block": "No image available."}
+
+    from fact_check_agent.src.tools.cross_modal_tool import _ensure_base64_uri
+
+    prompt = IMAGE_CLAIM_ASSESSOR_PROMPT.format(claim_text=inp.claim_text)
+    client = _llm_factory.make_vlm_client()
+    model  = _llm_factory.vlm_model_name()
+
+    try:
+        if settings.llm_provider == "ollama":
+            data_uri = _ensure_base64_uri(image_url)
+            if data_uri is None:
+                logger.warning("vlm_assessment: could not fetch image %s — skipping", image_url)
+                return {"vlm_assessment_block": "No image available."}
+            content = [
+                {"type": "image_url", "image_url": {"url": data_uri}},
+                {"type": "text", "text": prompt},
+            ]
+        else:
+            content = [
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "text", "text": prompt},
+            ]
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": content}],
+            temperature=0,
+        )
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1].lstrip("json").strip()
+        result = json.loads(raw)
+
+        assessment = float(result.get("assessment", 0.0))
+        block = (
+            f"Caption: {result.get('caption', 'N/A')}\n"
+            f"Visual Evidence: {result.get('visual_evidence', 'N/A')}\n"
+            f"Assessment: {assessment:+.2f} "
+            f"(+0.25=strong visual support, +0.10=partial, 0.0=irrelevant, "
+            f"-0.10=partial refutation, -0.25=strong refutation)\n"
+            f"Explanation: {result.get('explanation', 'N/A')}"
+        )
+        logger.info("vlm_assessment: image=%s assessment=%.2f", image_url[:80], assessment)
+        return {"vlm_assessment_block": block}
+
+    except Exception as exc:
+        logger.error("vlm_assessment_node failed: %s — skipping VLM signal", exc)
+        return {"vlm_assessment_block": "No image available."}
+
+
 # ── Node: synthesize_verdict ──────────────────────────────────────────────────
 
 # Credibility assigned to claims by source when no stored confidence is available
@@ -396,7 +460,17 @@ def synthesize_verdict(state: FactCheckState, settings) -> dict:
             response_format={"type": "json_object"},
             temperature=0,
         )
-        result = json.loads(response.choices[0].message.content)
+        raw = response.choices[0].message.content or ""
+        if not raw.strip():
+            # Ollama/Gemma3 sometimes returns empty content with json_object format
+            logger.warning("synthesize_verdict: empty response from LLM — retrying without json_object")
+            response = client.chat.completions.create(
+                model=_llm_factory.llm_model_name(),
+                messages=[{"role": "user", "content": prompt + "\n\nRespond in JSON."}],
+                temperature=0,
+            )
+            raw = response.choices[0].message.content or ""
+        result = json.loads(raw.strip())
     except Exception as e:
         logger.error("Verdict synthesis failed: %s", e)
         result = {"degrees": [], "reasoning": str(e)}
@@ -419,7 +493,7 @@ def synthesize_verdict(state: FactCheckState, settings) -> dict:
         evidence_links          = [],
         reasoning               = reasoning,
         cross_modal_flag        = False,
-        cross_modal_explanation = None,
+        vlm_assessment_block    = None,
     )
     return {
         "output":           output,
@@ -454,21 +528,24 @@ def _parse_json_response(raw: str) -> dict:
 
 
 def multi_agent_debate(state: FactCheckState, settings) -> dict:
-    """S4: 4-role structured debate for low-confidence verdicts.
+    """S4: 4-role structured debate for low-confidence verdicts and/or VLM image signal.
 
-    Flow:
-      Role 1 — Neutral already ran (synthesize_verdict); degrees stored in state.
-      Role 2 — Supporter: proposes Di boosts where neutral was too conservative.
-      Role 3 — Skeptic:   proposes Di penalties where neutral missed flaws.
-               (Supporter and Skeptic run independently, only see Neutral output.)
-      Role 4 — Judge:     receives all three, outputs final Di per evidence item.
+    Two entry modes:
+      Full debate (use_debate=True):
+        Role 2 — Supporter: proposes Di boosts where neutral was too conservative.
+        Role 3 — Skeptic:   proposes Di penalties where neutral missed flaws.
+        Role 4 — Judge:     combines all three + VLM assessment → final Di.
+      VLM-only (use_debate=False, image present):
+        Skips Supporter/Skeptic; Judge integrates only VLM signal into neutral Di.
     """
     inp             = state["input"]
     output          = state.get("output")
     context_claims  = state.get("context_claims") or []
     neutral_degrees = state.get("neutral_degrees") or []
+    neutral_reasoning = state.get("neutral_reasoning") or ""
     numbered_block  = _format_numbered_context_claims(context_claims)
     neutral_block   = _format_neutral_scores_block(context_claims, neutral_degrees)
+    vlm_block       = state.get("vlm_assessment_block") or "No image available."
 
     client = _llm_factory.make_llm_client()
     model  = _llm_factory.llm_model_name()
@@ -485,36 +562,63 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
         return raw
 
     try:
-        # ── Role 2: Supporter (independent of Skeptic) ────────────────────────
-        supporter_raw = _call(SUPPORTER_PROMPT.format(
-            claim_text=inp.claim_text,
-            numbered_claims=numbered_block,
-            neutral_scores_block=neutral_block,
-        ))
-        supporter_result = json.loads(supporter_raw)
-        supporter_adj = supporter_result.get("adjustments", [])
+        if settings.use_debate:
+            # ── Full S4: Supporter + Skeptic + Judge ──────────────────────────
+            supporter_raw = _call(SUPPORTER_PROMPT.format(
+                claim_text=inp.claim_text,
+                numbered_claims=numbered_block,
+                neutral_scores_block=neutral_block,
+            ))
+            supporter_result = json.loads(supporter_raw)
+            supporter_adj = supporter_result.get("adjustments", [])
 
-        # ── Role 3: Skeptic (independent of Supporter) ────────────────────────
-        skeptic_raw = _call(SKEPTIC_PROMPT.format(
-            claim_text=inp.claim_text,
-            numbered_claims=numbered_block,
-            neutral_scores_block=neutral_block,
-        ))
-        skeptic_result = json.loads(skeptic_raw)
-        skeptic_adj = skeptic_result.get("adjustments", [])
+            skeptic_raw = _call(SKEPTIC_PROMPT.format(
+                claim_text=inp.claim_text,
+                numbered_claims=numbered_block,
+                neutral_scores_block=neutral_block,
+            ))
+            skeptic_result = json.loads(skeptic_raw)
+            skeptic_adj = skeptic_result.get("adjustments", [])
 
-        logger.info(
-            "multi_agent_debate: supporter proposed %d adjustments, skeptic proposed %d",
-            len(supporter_adj), len(skeptic_adj),
-        )
+            logger.info(
+                "multi_agent_debate: supporter proposed %d adjustments, skeptic proposed %d",
+                len(supporter_adj), len(skeptic_adj),
+            )
+        else:
+            # ── VLM-only: skip Supporter/Skeptic, Judge uses image signal only ─
+            supporter_raw = "None — no debate was run"
+            skeptic_raw   = "None — no debate was run"
+            supporter_adj = []
+            skeptic_adj   = []
+            logger.info("multi_agent_debate: VLM-only judge path (use_debate=False)")
 
-        # ── Role 4: Judge ─────────────────────────────────────────────────────
+        # ── Fast-path: no debate + no image → skip LLM judge, use neutral verbatim ─
+        if not settings.use_debate and vlm_block == "No image available.":
+            final_degrees = list(neutral_degrees)
+            verdict, confidence, _ = _compute_verdict(context_claims, final_degrees)
+            reasoning = neutral_reasoning or "No debate and no image assessment — using neutral agent's verdict."
+            updated_output = output.model_copy(update={
+                "verdict":          verdict,
+                "confidence_score": confidence,
+                "reasoning":        reasoning,
+            }) if output else output
+            logger.info(
+                "multi_agent_debate: skipped judge (no debate + no image) — verdict=%s confidence=%d",
+                verdict, confidence,
+            )
+            return {
+                "output": updated_output,
+                "debate_transcript": "No debate and no image — using neutral verdict unchanged.",
+            }
+
+        # ── Role 4: Judge (always runs when debate mode or image is present) ───
         judge_raw = _call(JUDGE_PROMPT.format(
             claim_text=inp.claim_text,
             numbered_claims=numbered_block,
             neutral_scores_block=neutral_block,
             supporter_adjustments=supporter_raw,
             skeptic_adjustments=skeptic_raw,
+            vlm_assessment_block=vlm_block,
         ))
         judge_result = json.loads(judge_raw)
 
@@ -533,22 +637,45 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
             for i in range(len(context_claims))
         ]
 
+        # ── Clamp: when no debate ran, judge may only nudge via VLM ────────────
+        if not settings.use_debate:
+            for i in range(len(context_claims)):
+                if i >= len(final_degrees) or i >= len(neutral_degrees):
+                    continue
+                delta = abs(final_degrees[i] - neutral_degrees[i])
+                if delta > 0.5:
+                    logger.warning(
+                        "multi_agent_debate: clamping item %d (judge=%.1f → neutral=%.1f, delta=%.1f > 0.5)",
+                        i + 1, final_degrees[i], neutral_degrees[i], delta,
+                    )
+                    final_degrees[i] = neutral_degrees[i]
+
         verdict, confidence, evid_volume = _compute_verdict(context_claims, final_degrees)
 
-        # Lower confidence if many stalemates
-        if stalemates > 0:
+        # Lower confidence if many stalemates (full debate only)
+        if stalemates > 0 and settings.use_debate:
             stalemate_penalty = min(15, stalemates * 5)
             confidence = max(15, confidence - stalemate_penalty)
 
-        transcript = (
-            f"=== NEUTRAL (initial Di) ===\n{neutral_block}\n\n"
-            f"=== SUPPORTER ===\n{supporter_raw}\n\n"
-            f"=== SKEPTIC ===\n{skeptic_raw}\n\n"
-            f"=== JUDGE ===\n{judge_raw}"
-        )
-
-        debate_summary = judge_result.get("debate_summary", "")
-        reasoning = f"{debate_summary}\n\n[Debate: {len(supporter_adj)} boosts, {len(skeptic_adj)} penalties, {stalemates} stalemates]"
+        verdict_explanation = judge_result.get("verdict_explanation") or judge_result.get("debate_summary", "")
+        if settings.use_debate:
+            reasoning = (
+                f"{neutral_reasoning}\n\n"
+                f"{verdict_explanation}\n\n"
+                f"[Debate: {len(supporter_adj)} boosts, {len(skeptic_adj)} penalties, {stalemates} stalemates]"
+            )
+            transcript = (
+                f"=== NEUTRAL (initial Di) ===\n{neutral_block}\n\n"
+                f"=== SUPPORTER ===\n{supporter_raw}\n\n"
+                f"=== SKEPTIC ===\n{skeptic_raw}\n\n"
+                f"=== JUDGE ===\n{judge_raw}"
+            )
+        else:
+            reasoning = (
+                f"{neutral_reasoning}\n\n"
+                f"[Judge: {verdict_explanation}]"
+            )
+            transcript = f"=== JUDGE ONLY ===\n{judge_raw}"
 
         updated_output = output.model_copy(update={
             "verdict":          verdict,
@@ -558,8 +685,9 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
 
         logger.info(
             "multi_agent_debate: verdict=%s confidence=%d (stalemates=%d, "
-            "supporter_adj=%d, skeptic_adj=%d)",
+            "supporter_adj=%d, skeptic_adj=%d, vlm=%s)",
             verdict, confidence, stalemates, len(supporter_adj), len(skeptic_adj),
+            vlm_block != "No image available.",
         )
         return {"output": updated_output, "debate_transcript": transcript}
 
@@ -581,18 +709,20 @@ def cross_modal_check(state: FactCheckState, settings) -> dict:
         image_url     = getattr(inp, "image_url", None),
     )
 
+    vlm_block = state.get("vlm_assessment_block") or "No image available."
+
     current_output: Optional[FactCheckOutput] = state.get("output")
     updated_output = None
     if current_output:
         updated_output = current_output.model_copy(update={
-            "cross_modal_flag":        result["flag"],
-            "cross_modal_explanation": result["explanation"],
+            "cross_modal_flag":     result["flag"],
+            "vlm_assessment_block": vlm_block if vlm_block != "No image available." else None,
         })
 
     return {
-        "cross_modal_flag":        result["flag"],
-        "cross_modal_explanation": result["explanation"],
-        "clip_similarity_score":   result.get("siglip_score"),
+        "cross_modal_flag":     result["flag"],
+        "vlm_assessment_block": vlm_block if vlm_block != "No image available." else None,
+        "clip_similarity_score": result.get("siglip_score"),
         "output":                  updated_output or current_output,
     }
 

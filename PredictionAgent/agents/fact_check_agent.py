@@ -31,6 +31,7 @@ for _p in (str(_SCAPPER), str(_SCAPPER / "src"), str(_REPO_ROOT / "FakeNewsAgent
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from fact_check_agent.src.llm_factory import get_langfuse_handler
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
 from src.id_utils import make_id
 from src.models.pipeline import PreprocessingOutput
@@ -94,7 +95,8 @@ def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
     results: list[FactCheckOutput] = []
     for i in range(len(output.claims)):
         fc_input = _claim_to_input(output, i, image_caption, image_url)
-        state = graph.invoke({"input": fc_input})
+        lf = get_langfuse_handler()
+        state = graph.invoke({"input": fc_input}, config={"callbacks": [lf]} if lf else {})
         fc_output: Optional[FactCheckOutput] = state.get("output")
         if fc_output:
             results.append(fc_output)
@@ -196,7 +198,8 @@ def run_fact_check_by_claim_ids(claim_ids: list[str]) -> list[FactCheckOutput]:
             topic_text=topic_text,
         )
 
-        state = graph.invoke({"input": fc_input})
+        lf = get_langfuse_handler()
+        state = graph.invoke({"input": fc_input}, config={"callbacks": [lf]} if lf else {})
         fc_output: Optional[FactCheckOutput] = state.get("output")
         if fc_output:
             results.append(fc_output)
