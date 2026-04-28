@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # 1. RATE LIMITING
 # ─────────────────────────────────────────────
 
+
 class TestRateLimiting:
     """Tests for session-level rate limiting logic."""
 
@@ -93,10 +94,10 @@ class TestOutputSchemaValidation:
 
     def _valid_result(self, **overrides) -> dict:
         base = {
-            "verdict_id":       "vrd_abc123",
-            "label":            "supported",
-            "confidence":       0.85,
-            "claim_text":       "Test claim",
+            "verdict_id": "vrd_abc123",
+            "label": "supported",
+            "confidence": 0.85,
+            "claim_text": "Test claim",
             "evidence_summary": "Evidence here",
         }
         base.update(overrides)
@@ -185,6 +186,7 @@ class TestOutputSchemaValidation:
 # 3. BLOCKED INPUT LOGGING
 # ─────────────────────────────────────────────
 
+
 class TestBlockedInputLogging:
     """Tests that blocked inputs are logged with hashed content."""
 
@@ -216,6 +218,7 @@ class TestBlockedInputLogging:
     def test_legitimate_input_not_blocked(self):
         """Legitimate claim should pass without any block."""
         from agents.input_guardrail import layer_a_check
+
         result = layer_a_check("Tesla announced a new battery technology last week")
         assert result["blocked"] is False
 
@@ -229,7 +232,10 @@ class TestBlockedInputLogging:
 
         test_logger.warning(
             "BLOCKED | hash=%s | layer=%s | risk=%s | reason=%s",
-            "abc123def456abcd", "A", "HIGH", "prompt injection detected"
+            "abc123def456abcd",
+            "A",
+            "HIGH",
+            "prompt injection detected",
         )
         handler.flush()
 
@@ -243,6 +249,7 @@ class TestBlockedInputLogging:
 # ─────────────────────────────────────────────
 # 4. HITL AUDIT LOGGING
 # ─────────────────────────────────────────────
+
 
 class TestHITLAuditLogging:
     """Tests that HITL corrections are written to audit log."""
@@ -258,7 +265,12 @@ class TestHITLAuditLogging:
         audit_logger.info(
             "CORRECTION | verdict_id=%s | old_label=%s | new_label=%s "
             "| old_conf=%.2f | new_conf=%.2f | note=%s",
-            "vrd_abc123", "misleading", "refuted", 0.55, 0.85, "Reuters confirmed this"
+            "vrd_abc123",
+            "misleading",
+            "refuted",
+            0.55,
+            0.85,
+            "Reuters confirmed this",
         )
         handler.flush()
 
@@ -278,7 +290,12 @@ class TestHITLAuditLogging:
         audit_logger.info(
             "CORRECTION | verdict_id=%s | old_label=%s | new_label=%s "
             "| old_conf=%.2f | new_conf=%.2f | note=%s",
-            "vrd_xyz", "supported", "refuted", 0.70, 0.90, ""
+            "vrd_xyz",
+            "supported",
+            "refuted",
+            0.70,
+            0.90,
+            "",
         )
         handler.flush()
 
@@ -297,7 +314,12 @@ class TestHITLAuditLogging:
         audit_logger.info(
             "CORRECTION | verdict_id=%s | old_label=%s | new_label=%s "
             "| old_conf=%.2f | new_conf=%.2f | note=%s",
-            "vrd_conf_test", "misleading", "supported", 0.45, 0.80, "cross-checked"
+            "vrd_conf_test",
+            "misleading",
+            "supported",
+            0.45,
+            0.80,
+            "cross-checked",
         )
         handler.flush()
 
@@ -316,7 +338,12 @@ class TestHITLAuditLogging:
         audit_logger.info(
             "CORRECTION | verdict_id=%s | old_label=%s | new_label=%s "
             "| old_conf=%.2f | new_conf=%.2f | note=%s",
-            "vrd_note", "refuted", "misleading", 0.80, 0.60, "Partially true per AP News"
+            "vrd_note",
+            "refuted",
+            "misleading",
+            0.80,
+            0.60,
+            "Partially true per AP News",
         )
         handler.flush()
 
@@ -335,7 +362,7 @@ class TestHITLAuditLogging:
             audit_logger.info(
                 "CORRECTION | verdict_id=vrd_%d | old_label=misleading "
                 "| new_label=refuted | old_conf=0.50 | new_conf=0.85 | note=",
-                i
+                i,
             )
         handler.flush()
 
@@ -353,7 +380,12 @@ class TestHITLAuditLogging:
         audit_logger.info(
             "CORRECTION | verdict_id=%s | old_label=%s | new_label=%s "
             "| old_conf=%.2f | new_conf=%.2f | note=%s",
-            "vrd_nonote", "supported", "misleading", 0.75, 0.40, ""
+            "vrd_nonote",
+            "supported",
+            "misleading",
+            0.75,
+            0.40,
+            "",
         )
         handler.flush()
 

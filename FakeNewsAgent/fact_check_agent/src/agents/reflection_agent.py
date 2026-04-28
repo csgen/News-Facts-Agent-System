@@ -23,6 +23,7 @@ Design:
   - No LLM calls. No loops. Pure data utility wrapping MemoryAgent.
   - New (source, topic) pairs are created automatically via MERGE — no seeding needed.
 """
+
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -40,12 +41,13 @@ try:
 except ImportError:
     Verdict = None  # resolved at runtime via sys.path bootstrap in fact_check_agent.py
 
-_ALPHA      = 0.05   # agent verdict credibility learning rate
-_ALPHA_HITL = 0.08   # HITL correction learning rate (human signal weighted higher)
+_ALPHA = 0.05  # agent verdict credibility learning rate
+_ALPHA_HITL = 0.08  # HITL correction learning rate (human signal weighted higher)
 _DEFAULT_CREDIBILITY = 0.65  # fallback when source is unknown
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def source_id_from_url(source_url: str) -> str:
     """Derive source_id from a URL — mirrors preprocessing/agent.py convention.
@@ -59,9 +61,9 @@ def source_id_from_url(source_url: str) -> str:
 def credibility_signal(verdict_label: str, confidence_score: int) -> float:
     """Map a verdict + confidence to a credibility observation in [0, 1].
 
-      supported  @ conf  → conf/100        (source published truth)
-      refuted    @ conf  → 1 - conf/100    (source published falsehood)
-      misleading          → 0.5            (neutral)
+    supported  @ conf  → conf/100        (source published truth)
+    refuted    @ conf  → 1 - conf/100    (source published falsehood)
+    misleading          → 0.5            (neutral)
     """
     c = confidence_score / 100.0
     if verdict_label == "supported":
@@ -72,6 +74,7 @@ def credibility_signal(verdict_label: str, confidence_score: int) -> float:
 
 
 # ── Read path ─────────────────────────────────────────────────────────────────
+
 
 def query_source_credibility(
     claim_text: str,
@@ -96,7 +99,7 @@ def query_source_credibility(
 
         return {
             "credibility_mean": round(credibility, 4) if credibility is not None else None,
-            "sample_count":     1 if credibility is not None else 0,
+            "sample_count": 1 if credibility is not None else 0,
         }
     except Exception as exc:
         logger.warning("query_source_credibility failed for %s/%s: %s", source_id, topic, exc)
@@ -104,6 +107,7 @@ def query_source_credibility(
 
 
 # ── Write path — all 5 post-verdict updates ───────────────────────────────────
+
 
 def record_verdict_outcome(
     output: "FactCheckOutput",
@@ -129,13 +133,13 @@ def record_verdict_outcome(
         evidence_summary += "\n\nSources: " + " | ".join(output.evidence_links)
 
     verdict = Verdict(
-        verdict_id       = output.verdict_id,
-        claim_id         = output.claim_id,
-        label            = output.verdict,
-        confidence       = output.confidence_score / 100,
-        evidence_summary = evidence_summary,
-        image_mismatch   = output.cross_modal_flag,
-        verified_at      = datetime.now(timezone.utc),
+        verdict_id=output.verdict_id,
+        claim_id=output.claim_id,
+        label=output.verdict,
+        confidence=output.confidence_score / 100,
+        evidence_summary=evidence_summary,
+        image_mismatch=output.cross_modal_flag,
+        verified_at=datetime.now(timezone.utc),
     )
     try:
         memory.add_verdict(verdict)
@@ -153,8 +157,8 @@ def _update_credibility(
     memory: "MemoryAgent",
 ) -> None:
     source_id = source_id_from_url(source_url)
-    topic     = topic_text.strip() or "unknown"
-    signal    = credibility_signal(output.verdict, output.confidence_score)
+    topic = topic_text.strip() or "unknown"
+    signal = credibility_signal(output.verdict, output.confidence_score)
 
     try:
         current = memory.get_source_topic_credibility(source_id, topic)
@@ -166,7 +170,12 @@ def _update_credibility(
         memory.upsert_source_topic_credibility(source_id, topic, new_c)
         logger.info(
             "credibility update: source=%s topic=%s %.3f → %.3f (signal=%.2f verdict=%s)",
-            source_id, topic, current, new_c, signal, output.verdict,
+            source_id,
+            topic,
+            current,
+            new_c,
+            signal,
+            output.verdict,
         )
     except Exception as exc:
         logger.error("credibility update failed for %s/%s: %s", source_id, topic, exc)
@@ -174,10 +183,11 @@ def _update_credibility(
 
 # ── HITL write path ───────────────────────────────────────────────────────────
 
+
 def record_hitl_correction(
     verdict_id: str,
     fb_label: str,
-    fb_confidence: float,   # 0-1 float as received from the frontend slider
+    fb_confidence: float,  # 0-1 float as received from the frontend slider
     source_url: str,
     memory: "MemoryAgent",
 ) -> None:
@@ -197,9 +207,9 @@ def record_hitl_correction(
         logger.warning("get_topic_for_verdict failed for %s: %s", verdict_id, exc)
         topic = "unknown"
 
-    source_id      = source_id_from_url(source_url)
+    source_id = source_id_from_url(source_url)
     confidence_int = int(fb_confidence * 100)
-    signal         = credibility_signal(fb_label, confidence_int)
+    signal = credibility_signal(fb_label, confidence_int)
 
     try:
         current = memory.get_source_topic_credibility(source_id, topic)
@@ -212,9 +222,13 @@ def record_hitl_correction(
         logger.info(
             "HITL credibility update: source=%s topic=%s %.3f → %.3f "
             "(signal=%.2f label=%s conf=%d%%)",
-            source_id, topic, current, new_c, signal, fb_label, confidence_int,
+            source_id,
+            topic,
+            current,
+            new_c,
+            signal,
+            fb_label,
+            confidence_int,
         )
     except Exception as exc:
-        logger.error(
-            "HITL credibility update failed for %s/%s: %s", source_id, topic, exc
-        )
+        logger.error("HITL credibility update failed for %s/%s: %s", source_id, topic, exc)

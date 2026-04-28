@@ -1,10 +1,12 @@
 """Tests for the graph routing functions — no API keys required."""
+
 from unittest.mock import MagicMock, patch
 
 from fact_check_agent.src.graph.router import debate_check
 from fact_check_agent.src.models.schemas import FactCheckOutput
 
 # ── debate_check ──────────────────────────────────────────────────────────────
+
 
 def test_debate_check_returns_skip_when_use_debate_false():
     """Baseline: use_debate=False → debate_check must always return 'skip'."""

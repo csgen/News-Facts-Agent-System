@@ -1,4 +1,5 @@
 """Tests for the live search tool — no Tavily API key required."""
+
 from unittest.mock import MagicMock, patch
 
 from fact_check_agent.src.tools.live_search_tool import (
@@ -8,6 +9,7 @@ from fact_check_agent.src.tools.live_search_tool import (
 )
 
 # ── _count_distinct_domains ───────────────────────────────────────────────────
+
 
 def test_count_distinct_domains_all_same():
     results = [
@@ -38,6 +40,7 @@ def test_count_distinct_domains_missing_url():
 
 # ── format_search_context ─────────────────────────────────────────────────────
 
+
 def test_format_search_context_empty():
     context, links = format_search_context([])
     assert "No results" in context
@@ -47,7 +50,7 @@ def test_format_search_context_empty():
 def test_format_search_context_returns_links():
     results = [
         {"url": "https://reuters.com/1", "title": "Reuters story", "content": "Some evidence."},
-        {"url": "https://bbc.co.uk/1",   "title": "BBC story",     "content": "More evidence."},
+        {"url": "https://bbc.co.uk/1", "title": "BBC story", "content": "More evidence."},
     ]
     context, links = format_search_context(results)
     assert "reuters.com" in context
@@ -71,20 +74,25 @@ def test_format_search_context_no_url_excluded_from_links():
 
 # ── search_live ───────────────────────────────────────────────────────────────
 
+
 def make_tavily_result(urls):
-    return {"results": [
-        {"url": url, "title": f"Title {i}", "content": "Evidence text", "score": 0.9}
-        for i, url in enumerate(urls)
-    ]}
+    return {
+        "results": [
+            {"url": url, "title": f"Title {i}", "content": "Evidence text", "score": 0.9}
+            for i, url in enumerate(urls)
+        ]
+    }
 
 
 def test_search_live_returns_results():
     with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_cls:
-        mock_cls.return_value.search.return_value = make_tavily_result([
-            "https://reuters.com/1",
-            "https://bbc.co.uk/1",
-            "https://apnews.com/1",
-        ])
+        mock_cls.return_value.search.return_value = make_tavily_result(
+            [
+                "https://reuters.com/1",
+                "https://bbc.co.uk/1",
+                "https://apnews.com/1",
+            ]
+        )
         results = search_live("test claim", api_key="fake-key")
 
     assert len(results) == 3
@@ -92,9 +100,9 @@ def test_search_live_returns_results():
 
 def test_search_live_retries_when_too_few_domains():
     few_domains = make_tavily_result(["https://bbc.co.uk/1", "https://bbc.co.uk/2"])
-    many_domains = make_tavily_result([
-        "https://reuters.com/1", "https://bbc.co.uk/1", "https://apnews.com/1"
-    ])
+    many_domains = make_tavily_result(
+        ["https://reuters.com/1", "https://bbc.co.uk/1", "https://apnews.com/1"]
+    )
 
     with patch("fact_check_agent.src.tools.live_search_tool.TavilyClient") as mock_cls:
         mock_cls.return_value.search.side_effect = [few_domains, many_domains]

@@ -24,6 +24,7 @@ SOTA flags — toggle in .env before running:
     OLLAMA_LLM_MODEL=gemma4:e2b        Ollama model (or gemma4:12b for better accuracy)
     OLLAMA_VLM_MODEL=llava:7b          VLM for caption generation (leave blank to skip)
 """
+
 from __future__ import annotations
 
 import os
@@ -60,23 +61,21 @@ logger = logging.getLogger(__name__)
 # ── Label mapping ─────────────────────────────────────────────────────────────
 
 VERDICT_MAP = {
-    "Support_Multimodal":      "supported",
-    "Support_Text":            "supported",
+    "Support_Multimodal": "supported",
+    "Support_Text": "supported",
     "Insufficient_Multimodal": "misleading",
-    "Insufficient_Text":       "misleading",
-    "Refute":                  "refuted",
+    "Insufficient_Text": "misleading",
+    "Refute": "refuted",
 }
 
-DATASET_ROOT = (
-    Path(__file__).resolve().parents[3] / "datasets" / "Factify2" / "Factify 2"
-)
+DATASET_ROOT = Path(__file__).resolve().parents[3] / "datasets" / "Factify2" / "Factify 2"
 SPLIT_PATHS = {
-    "train":         DATASET_ROOT / "factify2_train" / "factify2" / "train.csv",
-    "val":           DATASET_ROOT / "factify2_train" / "factify2" / "val.csv",
-    "test":          DATASET_ROOT / "factify2_test"  / "test.csv",
+    "train": DATASET_ROOT / "factify2_train" / "factify2" / "train.csv",
+    "val": DATASET_ROOT / "factify2_train" / "factify2" / "val.csv",
+    "test": DATASET_ROOT / "factify2_test" / "test.csv",
     "train_curated": DATASET_ROOT / "factify2_train" / "factify2" / "train_curated.csv",
-    "val_curated":   DATASET_ROOT / "factify2_train" / "factify2" / "val_curated.csv",
-    "test_curated":  DATASET_ROOT / "factify2_test"  / "test_curated.csv",
+    "val_curated": DATASET_ROOT / "factify2_train" / "factify2" / "val_curated.csv",
+    "test_curated": DATASET_ROOT / "factify2_test" / "test_curated.csv",
 }
 _LOCAL_IMAGE_MAPPING_PATH = DATASET_ROOT.parent / "url_to_local.json"
 
@@ -85,14 +84,18 @@ def _load_url_mapping() -> dict:
     """Load url→local_path mapping produced by prefetch_images.py, if present."""
     if _LOCAL_IMAGE_MAPPING_PATH.exists():
         import json as _json
+
         with _LOCAL_IMAGE_MAPPING_PATH.open() as f:
             mapping = _json.load(f)
-        logger.info("Loaded %d local image mappings from %s", len(mapping), _LOCAL_IMAGE_MAPPING_PATH)
+        logger.info(
+            "Loaded %d local image mappings from %s", len(mapping), _LOCAL_IMAGE_MAPPING_PATH
+        )
         return mapping
     return {}
 
 
 # ── Dataset loader ────────────────────────────────────────────────────────────
+
 
 def load_factify2(split: str, limit: Optional[int] = None) -> pd.DataFrame:
     path = SPLIT_PATHS[split]
@@ -131,6 +134,7 @@ _CAPTION_CACHE_PATH = Path(__file__).resolve().parents[3] / "caption_cache.pkl"
 def _load_caption_cache() -> dict:
     if _CAPTION_CACHE_PATH.exists():
         import pickle
+
         with open(_CAPTION_CACHE_PATH, "rb") as f:
             cache = pickle.load(f)
         logger.info("Loaded %d cached captions from %s", len(cache), _CAPTION_CACHE_PATH)
@@ -140,12 +144,15 @@ def _load_caption_cache() -> dict:
 
 def _save_caption_cache(cache: dict) -> None:
     import pickle
+
     _CAPTION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(_CAPTION_CACHE_PATH, "wb") as f:
         pickle.dump(cache, f)
 
 
-def generate_captions_for_df(df: pd.DataFrame, vlm_model: str, ollama_base_url: str) -> dict[str, str]:
+def generate_captions_for_df(
+    df: pd.DataFrame, vlm_model: str, ollama_base_url: str
+) -> dict[str, str]:
     """Generate captions for all unique image URLs in the dataframe using the Ollama VLM.
 
     Returns a dict mapping image_url → caption. Results are cached to disk so
@@ -179,13 +186,15 @@ def generate_captions_for_df(df: pd.DataFrame, vlm_model: str, ollama_base_url: 
 
             response = client.chat.completions.create(
                 model=vlm_model,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": data_uri}},
-                        {"type": "text", "text": _CAPTION_PROMPT},
-                    ],
-                }],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": data_uri}},
+                            {"type": "text", "text": _CAPTION_PROMPT},
+                        ],
+                    }
+                ],
                 temperature=0.1,
                 max_tokens=200,
             )
@@ -204,8 +213,10 @@ def generate_captions_for_df(df: pd.DataFrame, vlm_model: str, ollama_base_url: 
 
 # ── Input builder ─────────────────────────────────────────────────────────────
 
-def build_fact_check_input(row: pd.Series, include_image: bool = True,
-                           caption_cache: Optional[dict] = None):
+
+def build_fact_check_input(
+    row: pd.Series, include_image: bool = True, caption_cache: Optional[dict] = None
+):
     """Convert one Factify2 row to a FactCheckInput.
 
     Option A: inject document text as prefetched_chunks → skips live_search.
@@ -216,8 +227,8 @@ def build_fact_check_input(row: pd.Series, include_image: bool = True,
 
     row_idx = str(row.get("Unnamed: 0", row.name))
     claim_text = str(row["claim"]).strip()
-    document   = str(row.get("document", "")).strip()
-    image_url  = str(row.get("claim_image", "")).strip() or None
+    document = str(row.get("document", "")).strip()
+    image_url = str(row.get("claim_image", "")).strip() or None
 
     evidence_chunk = f"[REFERENCE DOCUMENT]\n{document}"
 
@@ -234,6 +245,7 @@ def build_fact_check_input(row: pd.Series, include_image: bool = True,
     source_url = "https://factify2.benchmark/unknown"
     if image_url and image_url.startswith("http"):
         from urllib.parse import urlparse
+
         parsed = urlparse(image_url)
         source_url = f"{parsed.scheme}://{parsed.netloc}/"
 
@@ -242,25 +254,26 @@ def build_fact_check_input(row: pd.Series, include_image: bool = True,
         image_caption = caption_cache.get(image_url) or None
 
     return FactCheckInput(
-        claim_id      = make_id(f"factify2_{row_idx}_"),
-        claim_text    = claim_text,
-        entities      = [],
-        source_url    = source_url,
-        article_id    = f"factify2_{row_idx}",
-        image_url     = image_url if include_image else None,
-        image_caption = image_caption,
-        timestamp     = datetime.now(timezone.utc),
-        prefetched_chunks = [evidence_chunk],
+        claim_id=make_id(f"factify2_{row_idx}_"),
+        claim_text=claim_text,
+        entities=[],
+        source_url=source_url,
+        article_id=f"factify2_{row_idx}",
+        image_url=image_url if include_image else None,
+        image_caption=image_caption,
+        timestamp=datetime.now(timezone.utc),
+        prefetched_chunks=[evidence_chunk],
     )
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
 
+
 def compute_metrics(records: list[dict], pred_key: str = "pred_verdict") -> dict:
     """Compute accuracy, per-class F1, and confusion matrix from result records."""
     labels = ["supported", "refuted", "misleading"]
     y_true = [r["true_verdict"] for r in records if r.get(pred_key) is not None]
-    y_pred = [r[pred_key]       for r in records if r.get(pred_key) is not None]
+    y_pred = [r[pred_key] for r in records if r.get(pred_key) is not None]
     n = len(y_true)
     if n == 0:
         return {"accuracy": 0.0, "n": 0}
@@ -275,18 +288,23 @@ def compute_metrics(records: list[dict], pred_key: str = "pred_verdict") -> dict
         fp = sum(1 for t, p in zip(y_true, y_pred) if t != label and p == label)
         fn = sum(1 for t, p in zip(y_true, y_pred) if t == label and p != label)
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-        per_class[label] = {"precision": round(precision, 4), "recall": round(recall, 4), "f1": round(f1, 4),
-                            "support": sum(1 for t in y_true if t == label)}
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        per_class[label] = {
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "support": sum(1 for t in y_true if t == label),
+        }
 
     macro_f1 = sum(v["f1"] for v in per_class.values()) / len(labels)
 
     # Confusion matrix (rows=true, cols=pred)
     conf_matrix = {}
     for t in labels:
-        conf_matrix[t] = {p: sum(1 for yt, yp in zip(y_true, y_pred) if yt == t and yp == p)
-                         for p in labels}
+        conf_matrix[t] = {
+            p: sum(1 for yt, yp in zip(y_true, y_pred) if yt == t and yp == p) for p in labels
+        }
 
     # Error analysis
     n_errors = n - correct
@@ -348,30 +366,38 @@ def _run_debate(
         return resp.choices[0].message.content.strip()
 
     try:
-        supporter_raw = _call(SUPPORTER_PROMPT.format(
-            claim_text=claim_text,
-            numbered_claims=numbered_block,
-            neutral_scores_block=neutral_block,
-        ))
-        skeptic_raw = _call(SKEPTIC_PROMPT.format(
-            claim_text=claim_text,
-            numbered_claims=numbered_block,
-            neutral_scores_block=neutral_block,
-        ))
-        judge_raw = _call(JUDGE_PROMPT.format(
-            claim_text=claim_text,
-            numbered_claims=numbered_block,
-            neutral_scores_block=neutral_block,
-            supporter_adjustments=supporter_raw,
-            skeptic_adjustments=skeptic_raw,
-        ))
+        supporter_raw = _call(
+            SUPPORTER_PROMPT.format(
+                claim_text=claim_text,
+                numbered_claims=numbered_block,
+                neutral_scores_block=neutral_block,
+            )
+        )
+        skeptic_raw = _call(
+            SKEPTIC_PROMPT.format(
+                claim_text=claim_text,
+                numbered_claims=numbered_block,
+                neutral_scores_block=neutral_block,
+            )
+        )
+        judge_raw = _call(
+            JUDGE_PROMPT.format(
+                claim_text=claim_text,
+                numbered_claims=numbered_block,
+                neutral_scores_block=neutral_block,
+                supporter_adjustments=supporter_raw,
+                skeptic_adjustments=skeptic_raw,
+            )
+        )
 
         judge_result = _parse_json(judge_raw)
         final_scores = {
             item["evidence_id"]: float(item["final_D"])
             for item in judge_result.get("final_scores", [])
         }
-        stalemates = sum(1 for item in judge_result.get("final_scores", []) if item.get("stalemate"))
+        stalemates = sum(
+            1 for item in judge_result.get("final_scores", []) if item.get("stalemate")
+        )
 
         final_degrees = [
             final_scores.get(i + 1, neutral_degrees[i] if i < len(neutral_degrees) else 0.0)
@@ -383,7 +409,7 @@ def _run_debate(
             confidence = max(15, confidence - min(15, stalemates * 5))
 
         supporter_adj = _parse_json(supporter_raw).get("adjustments", [])
-        skeptic_adj   = _parse_json(skeptic_raw).get("adjustments", [])
+        skeptic_adj = _parse_json(skeptic_raw).get("adjustments", [])
         debate_summary = judge_result.get("debate_summary", "")
         reasoning = f"{debate_summary}\n\n[Debate: {len(supporter_adj)} boosts, {len(skeptic_adj)} penalties, {stalemates} stalemates]"
         return verdict, confidence, reasoning
@@ -423,10 +449,10 @@ def _run_factify2_verdict_pipeline(
 
     # Step 1–3: generate questions + extract answers from document
     claims = context_claim_agent.run(
-        claim_text        = claim_text,
-        fresh_context     = [],
-        prefetched_chunks = prefetched_chunks,
-        tavily_api_key    = "",
+        claim_text=claim_text,
+        fresh_context=[],
+        prefetched_chunks=prefetched_chunks,
+        tavily_api_key="",
     )
 
     if not claims:
@@ -436,33 +462,35 @@ def _run_factify2_verdict_pipeline(
             if run_both:
                 return "misleading", 15, "No evidence.", "misleading", 15, "No evidence."
             return "misleading", 15, "No evidence extracted and document is empty."
-        claims = [{
-            "type":        "factual",
-            "question":    None,
-            "content":     raw_doc[:2000],
-            "source_name": None,
-            "timestamp":   None,
-            "verdict":     None,
-            "confidence":  None,
-            "source":      "prefetched",
-            "source_url":  None,
-        }]
+        claims = [
+            {
+                "type": "factual",
+                "question": None,
+                "content": raw_doc[:2000],
+                "source_name": None,
+                "timestamp": None,
+                "verdict": None,
+                "confidence": None,
+                "source": "prefetched",
+                "source_url": None,
+            }
+        ]
 
     # Step 4: neutral verdict synthesis
     numbered_block = _format_numbered_context_claims(claims)
     prompt = VERDICT_SYNTHESIS_PROMPT.format(
-        claim_text      = claim_text,
-        numbered_claims = numbered_block,
+        claim_text=claim_text,
+        numbered_claims=numbered_block,
     )
 
-    model  = _llm_factory.llm_model_name()
+    model = _llm_factory.llm_model_name()
     client = _llm_factory.make_llm_client()
     try:
         response = client.chat.completions.create(
-            model           = model,
-            messages        = [{"role": "user", "content": prompt}],
-            response_format = {"type": "json_object"},
-            temperature     = 0,
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
         )
         result = _parse_json(response.choices[0].message.content or "")
     except Exception as e:
@@ -471,7 +499,7 @@ def _run_factify2_verdict_pipeline(
             return "misleading", 50, err, "misleading", 50, err
         return "misleading", 50, err
 
-    degrees  = [float(x) for x in result.get("degrees", [])]
+    degrees = [float(x) for x in result.get("degrees", [])]
     reasoning = result.get("reasoning", "")
 
     if not degrees:
@@ -501,13 +529,19 @@ def print_metrics(metrics: dict, settings_snapshot: dict) -> None:
         print("  No predictions made — all records errored.")
         print("=" * 60)
         return
-    print(f"  n={metrics['n']}  accuracy={metrics['accuracy']:.3f}  macro_F1={metrics['macro_f1']:.3f}")
-    print(f"  mean_confidence={metrics['mean_confidence']:.1f}  cross_modal_flagged={metrics['cross_modal_flagged']} ({metrics['cross_modal_flag_rate']:.1%})")
+    print(
+        f"  n={metrics['n']}  accuracy={metrics['accuracy']:.3f}  macro_F1={metrics['macro_f1']:.3f}"
+    )
+    print(
+        f"  mean_confidence={metrics['mean_confidence']:.1f}  cross_modal_flagged={metrics['cross_modal_flagged']} ({metrics['cross_modal_flag_rate']:.1%})"
+    )
     print()
     print(f"  {'Label':<18} {'Prec':>6} {'Rec':>6} {'F1':>6} {'N':>5}")
-    print(f"  {'-'*43}")
+    print(f"  {'-' * 43}")
     for label, v in metrics["per_class"].items():
-        print(f"  {label:<18} {v['precision']:>6.3f} {v['recall']:>6.3f} {v['f1']:>6.3f} {v['support']:>5}")
+        print(
+            f"  {label:<18} {v['precision']:>6.3f} {v['recall']:>6.3f} {v['f1']:>6.3f} {v['support']:>5}"
+        )
     print()
     print("  Confusion matrix (rows=true, cols=pred):")
     labels = list(metrics["confusion_matrix"].keys())
@@ -525,6 +559,7 @@ def print_metrics(metrics: dict, settings_snapshot: dict) -> None:
 
 
 # ── Main runner ───────────────────────────────────────────────────────────────
+
 
 def run_benchmark(
     split: str = "val",
@@ -549,29 +584,29 @@ def run_benchmark(
 
     # Must set env before importing settings
     for key, default in [
-        ("LLM_PROVIDER",      "ollama"),
+        ("LLM_PROVIDER", "ollama"),
         ("EMBEDDING_PROVIDER", "ollama"),
-        ("OPENAI_API_KEY",     "unused"),
-        ("NEO4J_URI",          "bolt://localhost:7687"),
-        ("NEO4J_PASSWORD",     "fakenews123"),
-        ("CHROMA_HOST",        "localhost"),
-        ("LANGFUSE_ENABLED",   "false"),   # disable langfuse tracing — prevents 404 spam
+        ("OPENAI_API_KEY", "unused"),
+        ("NEO4J_URI", "bolt://localhost:7687"),
+        ("NEO4J_PASSWORD", "fakenews123"),
+        ("CHROMA_HOST", "localhost"),
+        ("LANGFUSE_ENABLED", "false"),  # disable langfuse tracing — prevents 404 spam
     ]:
         os.environ.setdefault(key, default)
 
     from fact_check_agent.src.config import settings
 
     settings_snapshot = {
-        "llm_provider":            settings.llm_provider,
-        "ollama_llm_model":        settings.ollama_llm_model,
-        "use_siglip":              settings.use_siglip,
-        "use_retrieval_gate":      settings.use_retrieval_gate,
+        "llm_provider": settings.llm_provider,
+        "ollama_llm_model": settings.ollama_llm_model,
+        "use_siglip": settings.use_siglip,
+        "use_retrieval_gate": settings.use_retrieval_gate,
         "use_claim_decomposition": settings.use_claim_decomposition,
-        "use_debate":              settings.use_debate,
-        "use_freshness_react":     settings.use_freshness_react,
-        "include_image":           include_image,
-        "split":                   split,
-        "limit":                   limit,
+        "use_debate": settings.use_debate,
+        "use_freshness_react": settings.use_freshness_react,
+        "include_image": include_image,
+        "split": split,
+        "limit": limit,
     }
 
     if data_path:
@@ -594,7 +629,9 @@ def run_benchmark(
     caption_cache: dict = {}
     if include_image and settings.ollama_vlm_model:
         print(f"\nPre-generating image captions (VLM: {settings.ollama_vlm_model})...")
-        caption_cache = generate_captions_for_df(df, settings.ollama_vlm_model, settings.ollama_base_url)
+        caption_cache = generate_captions_for_df(
+            df, settings.ollama_vlm_model, settings.ollama_base_url
+        )
         print(f"  {sum(1 for v in caption_cache.values() if v)} captions available")
 
     results: list[dict] = []
@@ -605,44 +642,54 @@ def run_benchmark(
 
     for i, row in tqdm(df.iterrows(), total=len(df), desc="Claims", unit="claim"):
         true_label_raw = str(row.get("Category", "")).strip()
-        true_verdict   = VERDICT_MAP.get(true_label_raw, "misleading")
+        true_verdict = VERDICT_MAP.get(true_label_raw, "misleading")
 
         try:
-            fact_input = build_fact_check_input(row, include_image=include_image,
-                                                caption_cache=caption_cache)
+            fact_input = build_fact_check_input(
+                row, include_image=include_image, caption_cache=caption_cache
+            )
             claim_num = len(results) + 1
-            print(f"\n── Claim {claim_num}/{len(df)}  [{true_label_raw}] ──────────────────────────────")
-            print(f"   {fact_input.claim_text[:100]}{'…' if len(fact_input.claim_text) > 100 else ''}")
+            print(
+                f"\n── Claim {claim_num}/{len(df)}  [{true_label_raw}] ──────────────────────────────"
+            )
+            print(
+                f"   {fact_input.claim_text[:100]}{'…' if len(fact_input.claim_text) > 100 else ''}"
+            )
 
             t_claim = time.time()
             if run_both:
-                nd_verdict, nd_conf, nd_reasoning, db_verdict, db_conf, db_reasoning = \
+                nd_verdict, nd_conf, nd_reasoning, db_verdict, db_conf, db_reasoning = (
                     _run_factify2_verdict_pipeline(
-                        claim_text        = fact_input.claim_text,
-                        prefetched_chunks = list(fact_input.prefetched_chunks),
-                        run_both          = True,
+                        claim_text=fact_input.claim_text,
+                        prefetched_chunks=list(fact_input.prefetched_chunks),
+                        run_both=True,
                     )
+                )
                 pred_verdict = nd_verdict
-                confidence   = nd_conf
-                reasoning    = nd_reasoning
+                confidence = nd_conf
+                reasoning = nd_reasoning
             else:
                 pred_verdict, confidence, reasoning = _run_factify2_verdict_pipeline(
-                    claim_text        = fact_input.claim_text,
-                    prefetched_chunks = list(fact_input.prefetched_chunks),
+                    claim_text=fact_input.claim_text,
+                    prefetched_chunks=list(fact_input.prefetched_chunks),
                 )
                 db_verdict = db_conf = db_reasoning = None
 
-            claim_elapsed    = time.time() - t_claim
+            claim_elapsed = time.time() - t_claim
             cross_modal_flag = False
-            cross_modal_exp  = None
+            cross_modal_exp = None
 
             nd_mark = "✓" if pred_verdict == true_verdict else "✗"
             if run_both:
                 db_mark = "✓" if db_verdict == true_verdict else "✗"
                 print(f"   no-debate: {nd_mark} pred={pred_verdict}  conf={nd_conf}")
-                print(f"   debate:    {db_mark} pred={db_verdict}  conf={db_conf}  [{claim_elapsed:.1f}s]")
+                print(
+                    f"   debate:    {db_mark} pred={db_verdict}  conf={db_conf}  [{claim_elapsed:.1f}s]"
+                )
             else:
-                print(f"   {nd_mark} pred={pred_verdict}  true={true_verdict}  conf={confidence}  {claim_elapsed:.1f}s")
+                print(
+                    f"   {nd_mark} pred={pred_verdict}  true={true_verdict}  conf={confidence}  {claim_elapsed:.1f}s"
+                )
 
         except Exception as e:
             logger.error("Record %d failed: %s", i, e)
@@ -654,23 +701,23 @@ def run_benchmark(
             reasoning = db_reasoning = f"ERROR: {e}"
 
         record = {
-            "row_idx":            str(row.get("Unnamed: 0", i)),
-            "claim":              str(row["claim"])[:200],
-            "true_category":      true_label_raw,
-            "true_verdict":       true_verdict,
-            "pred_verdict":       pred_verdict,
-            "confidence_score":   confidence,
-            "cross_modal_flag":   cross_modal_flag,
-            "cross_modal_explanation": cross_modal_exp,
-            "correct":            pred_verdict == true_verdict if pred_verdict else False,
-            "reasoning":          reasoning[:300] if reasoning else None,
-            "has_claim_image":    bool(str(row.get("claim_image", "")).strip() not in ("", "nan")),
+            "row_idx": str(row.get("Unnamed: 0", i)),
+            "claim": str(row["claim"])[:200],
+            "true_category": true_label_raw,
+            "true_verdict": true_verdict,
+            "pred_verdict": pred_verdict,
+            "confidence_score": confidence,
+            "cross_modal_flag": cross_modal_flag,
+            "vlm_assessment_block": cross_modal_exp,
+            "correct": pred_verdict == true_verdict if pred_verdict else False,
+            "reasoning": reasoning[:300] if reasoning else None,
+            "has_claim_image": bool(str(row.get("claim_image", "")).strip() not in ("", "nan")),
         }
         if run_both:
-            record["pred_verdict_debate"]   = db_verdict
-            record["confidence_debate"]     = db_conf
-            record["correct_debate"]        = db_verdict == true_verdict if db_verdict else False
-            record["reasoning_debate"]      = db_reasoning[:300] if db_reasoning else None
+            record["pred_verdict_debate"] = db_verdict
+            record["confidence_debate"] = db_conf
+            record["correct_debate"] = db_verdict == true_verdict if db_verdict else False
+            record["reasoning_debate"] = db_reasoning[:300] if db_reasoning else None
         results.append(record)
 
         # Progress reporting
@@ -680,9 +727,13 @@ def run_benchmark(
             acc_so_far = sum(1 for r in results if r["correct"]) / len(results)
             if run_both:
                 acc_db = sum(1 for r in results if r.get("correct_debate")) / len(results)
-                print(f"  [{done:>4}/{len(df)}] no-debate acc={acc_so_far:.3f}  debate acc={acc_db:.3f}  errors={n_errors}  elapsed={elapsed:.0f}s")
+                print(
+                    f"  [{done:>4}/{len(df)}] no-debate acc={acc_so_far:.3f}  debate acc={acc_db:.3f}  errors={n_errors}  elapsed={elapsed:.0f}s"
+                )
             else:
-                print(f"  [{done:>4}/{len(df)}] acc={acc_so_far:.3f}  errors={n_errors}  elapsed={elapsed:.0f}s")
+                print(
+                    f"  [{done:>4}/{len(df)}] acc={acc_so_far:.3f}  errors={n_errors}  elapsed={elapsed:.0f}s"
+                )
 
     total_time = time.time() - start_time
     metrics = compute_metrics(results)
@@ -722,24 +773,45 @@ def run_benchmark(
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(description="Factify2 benchmark for the Fact-Check Agent")
-    parser.add_argument("--split",    default="val", choices=["val", "train", "test", "val_curated", "test_curated", "train_curated"],
-                        help="Dataset split to evaluate (default: val)")
-    parser.add_argument("--limit",    type=int, default=200,
-                        help="Max records to evaluate (default: 200; set 0 for full split)")
-    parser.add_argument("--out",      default=None,
-                        help="Output CSV path (default: results/benchmark_<timestamp>.csv)")
-    parser.add_argument("--no-image", action="store_true",
-                        help="Disable image_url field (text-only mode)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Skip all DB writes (ChromaDB + Neo4j) — benchmark only")
-    parser.add_argument("--offline", action="store_true",
-                        help="Skip all DB reads+writes — no Docker needed, implies --dry-run")
-    parser.add_argument("--data-path", default=None,
-                        help="Path to a custom TSV dataset (overrides --split)")
-    parser.add_argument("--both", action="store_true",
-                        help="Run both no-debate and debate in a single pass and compare")
+    parser.add_argument(
+        "--split",
+        default="val",
+        choices=["val", "train", "test", "val_curated", "test_curated", "train_curated"],
+        help="Dataset split to evaluate (default: val)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="Max records to evaluate (default: 200; set 0 for full split)",
+    )
+    parser.add_argument(
+        "--out", default=None, help="Output CSV path (default: results/benchmark_<timestamp>.csv)"
+    )
+    parser.add_argument(
+        "--no-image", action="store_true", help="Disable image_url field (text-only mode)"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Skip all DB writes (ChromaDB + Neo4j) — benchmark only",
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Skip all DB reads+writes — no Docker needed, implies --dry-run",
+    )
+    parser.add_argument(
+        "--data-path", default=None, help="Path to a custom TSV dataset (overrides --split)"
+    )
+    parser.add_argument(
+        "--both",
+        action="store_true",
+        help="Run both no-debate and debate in a single pass and compare",
+    )
     args = parser.parse_args()
 
     if args.offline:
@@ -750,12 +822,12 @@ def main():
 
     limit = args.limit if args.limit > 0 else None
     run_benchmark(
-        split        = args.split,
-        limit        = limit,
-        output_path  = args.out,
-        include_image= not args.no_image,
-        data_path    = args.data_path,
-        run_both     = args.both,
+        split=args.split,
+        limit=limit,
+        output_path=args.out,
+        include_image=not args.no_image,
+        data_path=args.data_path,
+        run_both=args.both,
     )
 
 

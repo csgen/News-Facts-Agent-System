@@ -12,6 +12,7 @@ LLM call order per run (no image, empty tavily key):
   1. context_claim_agent: question generation
   2. synthesize_verdict: degrees + reasoning
 """
+
 import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -20,6 +21,7 @@ from fact_check_agent.src.graph.graph import build_graph
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
+
 
 def make_fact_check_input(claim_text="Test claim about vaccines.", image_caption=None):
     return FactCheckInput(
@@ -45,7 +47,7 @@ def make_memory_mock(max_confidence=0.0):
     """Return a mock MemoryAgent with no similar claims."""
     memory = MagicMock()
     memory.search_similar_claims.return_value = {
-        "ids":       [[]],
+        "ids": [[]],
         "documents": [[]],
         "distances": [[]],
         "metadatas": [[]],
@@ -73,10 +75,12 @@ def make_question_gen_response():
 def make_verdict_degrees_response(label="refuted"):
     """LLM response for synthesize_verdict — uses degrees format."""
     degrees = [-1.0] if label == "refuted" else [1.0]
-    content = json.dumps({
-        "degrees":  degrees,
-        "reasoning": f"Evidence {label} the claim.",
-    })
+    content = json.dumps(
+        {
+            "degrees": degrees,
+            "reasoning": f"Evidence {label} the claim.",
+        }
+    )
     choice = MagicMock()
     choice.message.content = content
     response = MagicMock()
@@ -95,22 +99,25 @@ def make_openai_cross_modal_response(conflict=False):
 
 def make_tavily_response(n_results=3):
     urls = [f"https://source{i}.com/{i}" for i in range(n_results)]
-    return {"results": [
-        {"url": url, "title": f"Title {i}", "content": "Evidence text.", "score": 0.9}
-        for i, url in enumerate(urls)
-    ]}
+    return {
+        "results": [
+            {"url": url, "title": f"Title {i}", "content": "Evidence text.", "score": 0.9}
+            for i, url in enumerate(urls)
+        ]
+    }
 
 
 # ── Full pipeline path ────────────────────────────────────────────────────────
 
+
 def test_graph_live_search_path_returns_output():
     """Full graph run should return a valid FactCheckOutput."""
-    memory  = make_memory_mock()
+    memory = make_memory_mock()
 
     with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
         mock_llm.return_value.chat.completions.create.side_effect = [
-            make_question_gen_response(),    # context_claim_agent: Q-gen
-            make_verdict_degrees_response(), # synthesize_verdict
+            make_question_gen_response(),  # context_claim_agent: Q-gen
+            make_verdict_degrees_response(),  # synthesize_verdict
         ]
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input()})
@@ -161,6 +168,7 @@ def test_graph_verdict_fields_populated():
 
 # ── Cross-modal flag ──────────────────────────────────────────────────────────
 
+
 def test_graph_cross_modal_flag_propagated():
     """When LLM detects a cross-modal conflict, the flag should be set on output."""
     memory = make_memory_mock()
@@ -171,19 +179,21 @@ def test_graph_cross_modal_flag_propagated():
 
     with patch("fact_check_agent.src.llm_factory.make_llm_client") as mock_llm:
         mock_llm.return_value.chat.completions.create.side_effect = [
-            make_question_gen_response(),    # Q-gen
-            make_verdict_degrees_response(), # synthesize_verdict
-            xmodal,                          # cross_modal_check (image present)
+            make_question_gen_response(),  # Q-gen
+            make_verdict_degrees_response(),  # synthesize_verdict
+            xmodal,  # cross_modal_check (image present)
         ]
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input(image_caption="Caption text")})
 
     output = state["output"]
     assert output.cross_modal_flag is True
-    assert output.cross_modal_explanation is not None
+    # vlm_assessment_block only populated when image_url is present; this test has none
+    assert output.vlm_assessment_block is None
 
 
 # ── receive_claim node ────────────────────────────────────────────────────────
+
 
 def test_receive_claim_resets_state():
     """receive_claim node should initialise all mutable fields to safe defaults."""
@@ -205,6 +215,7 @@ def test_receive_claim_resets_state():
 
 # ── Cache/freshness path tests ────────────────────────────────────────────────
 
+
 def make_cache_hit_memory_mock(confidence=0.92, days_old=2):
     """Return a MemoryAgent mock that produces a high-confidence cache hit."""
     from datetime import timedelta
@@ -212,21 +223,26 @@ def make_cache_hit_memory_mock(confidence=0.92, days_old=2):
     verified_at = datetime.now(timezone.utc) - timedelta(days=days_old)
     memory = MagicMock()
     memory.search_similar_claims.return_value = {
-        "ids":       [["clm_cached001"]],
+        "ids": [["clm_cached001"]],
         "documents": [["COVID vaccines are safe and effective."]],
         "distances": [[0.05]],
-        "metadatas": [[{
-            "verdict_label":      "supported",
-            "verdict_confidence": confidence,
-            "verified_at":        verified_at.isoformat(),
-        }]],
+        "metadatas": [
+            [
+                {
+                    "verdict_label": "supported",
+                    "verdict_confidence": confidence,
+                    "verified_at": verified_at.isoformat(),
+                }
+            ]
+        ],
     }
     memory.get_entity_context.return_value = []
     memory.get_entity_ids_for_claims.return_value = []
     memory.get_graph_claims_for_entities.return_value = []
     memory.get_verdict_by_claim.return_value = {
-        "metadatas": [{"label": "supported", "confidence": confidence,
-                       "verified_at": verified_at.isoformat()}]
+        "metadatas": [
+            {"label": "supported", "confidence": confidence, "verified_at": verified_at.isoformat()}
+        ]
     }
     memory.add_verdict.return_value = None
     memory.get_source_topic_credibility.return_value = None
@@ -236,11 +252,13 @@ def make_cache_hit_memory_mock(confidence=0.92, days_old=2):
 
 
 def make_freshness_response(revalidate: bool):
-    content = json.dumps({
-        "revalidate": revalidate,
-        "reason": "test reason",
-        "claim_category": "scientific",
-    })
+    content = json.dumps(
+        {
+            "revalidate": revalidate,
+            "reason": "test reason",
+            "claim_category": "scientific",
+        }
+    )
     choice = MagicMock()
     choice.message.content = content
     resp = MagicMock()
@@ -256,8 +274,8 @@ def test_cache_fresh_path_produces_output():
         # LLM calls: freshness_check (1 hit) → Q-gen → synthesize_verdict
         mock_llm.return_value.chat.completions.create.side_effect = [
             make_freshness_response(revalidate=False),  # claim tagged as fresh
-            make_question_gen_response(),               # Q-gen
-            make_verdict_degrees_response(),            # synthesize_verdict
+            make_question_gen_response(),  # Q-gen
+            make_verdict_degrees_response(),  # synthesize_verdict
         ]
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input()})
@@ -277,8 +295,8 @@ def test_cache_stale_path_produces_output():
         # LLM calls: freshness_check (1 hit) → Q-gen → synthesize_verdict
         mock_llm.return_value.chat.completions.create.side_effect = [
             make_freshness_response(revalidate=True),  # claim tagged as stale
-            make_question_gen_response(),              # Q-gen
-            make_verdict_degrees_response(),           # synthesize_verdict
+            make_question_gen_response(),  # Q-gen
+            make_verdict_degrees_response(),  # synthesize_verdict
         ]
         graph = build_graph(memory)
         state = graph.invoke({"input": make_fact_check_input()})
@@ -291,6 +309,7 @@ def test_cache_stale_path_produces_output():
 
 
 # ── Reflection agent integration ──────────────────────────────────────────────
+
 
 def test_reflection_agent_source_credibility_populated():
     """After graph run, state['source_credibility'] must be populated (even if all-None)."""

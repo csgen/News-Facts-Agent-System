@@ -26,12 +26,14 @@ Di SCALE — use EXACTLY one of these five values per item:
 IMPORTANT: For COUNTER-FACTUAL items — if the evidence confirms the counter-factual
 question, that CHALLENGES the main claim → assign a NEGATIVE degree.
 
-Reference evidence as [N] in your reasoning.
+In the "reasoning" field, describe the evidence by its actual text/content, NOT by number.
+Good: "Reuters reported the recall affected 500 vehicles, directly supporting the claim."
+Bad: "Evidence [3] supports the claim." — the user never sees the evidence numbers.
 
 Return JSON (no verdict field — the verdict is computed from your degrees):
 {{
   "degrees": [<one of 1.0, 0.5, 0.0, -0.5, -1.0 per evidence item, in input order>],
-  "reasoning": "<2-3 sentences explaining your assessment, citing [N] items>"
+  "reasoning": "<2-3 sentences explaining your assessment, describing evidence by its actual content>"
 }}
 """
 
@@ -51,7 +53,10 @@ that will either confirm its truth or expose it as a fabrication.
     "context-swapping" (legitimate media reused in a false narrative).
     If answered with supporting evidence → the claim is more likely FALSE.
 
-Make all questions specific, independently answerable, and directly tied to the core assertion.
+Each question must be fully self-contained — include the key entities, names, dates, locations,
+and events from the claim so the question works as a standalone web search query without
+needing to read the original claim. A question like "Did this happen?" or "Was the claim true?"
+is unacceptable; every question must carry enough context to retrieve relevant results on its own.
 
 CLAIM: {claim_text}
 
@@ -130,6 +135,40 @@ Return JSON:
 {{
   "conflict": true | false,
   "explanation": "<one sentence describing the conflict, or null if no conflict>"
+}}
+"""
+# ── v2.1 claim-only VLM image assessor (no prior verdict) ────────────────────
+
+IMAGE_CLAIM_ASSESSOR_PROMPT = """\
+You are a visual fact-check assistant. Examine the image and the claim below.
+
+[CLAIM]
+{claim_text}
+
+Perform two tasks:
+
+TASK 1 — Evidence: Name the specific visual element(s) in the image (person, object, \
+text overlay, location marker, event) that are directly relevant to the claim. \
+If the image is AI-generated, CGI, or clearly unrelated to the claim, state that explicitly.
+
+TASK 2 — Assessment: Based solely on those specific visual elements, assign an impact score. \
+Be conservative — images corroborate but rarely prove. When uncertain, use 0.0. \
+A score of ±0.25 requires unambiguous, explicit visual proof (e.g. visible text, \
+dated banner, or unmistakable identifiable evidence directly confirming or contradicting \
+the claim). Most images should score ±0.10 or 0.0.
+
+   0.25  — unambiguous explicit visual PROOF supporting the claim (very rare)
+   0.10  — image shows relevant visual context that partially supports the claim
+   0.0   — image is irrelevant, AI-generated, or adds no new verifiable information
+  -0.10  — image shows visual context that partially contradicts the claim
+  -0.25  — unambiguous explicit visual PROOF refuting the claim (very rare)
+
+Return JSON only — no markdown fences:
+{{
+  "caption": "<1-2 sentence objective description of the image>",
+  "visual_evidence": "<specific element(s) in the image relevant to the claim>",
+  "assessment": <one of: 0.25, 0.10, 0.0, -0.10, -0.25>,
+  "explanation": "<one sentence explaining why this score was chosen>"
 }}
 """
 
@@ -291,9 +330,13 @@ If no adjustments are warranted, return: {{"adjustments": []}}
 """
 
 JUDGE_PROMPT = """\
-You are the Final Moderator in a multi-agent fact-check debate.
-You receive the Neutral Agent's baseline Di scores, the Supporter's proposed boosts, and \
-the Skeptic's proposed penalties. Output a final calibrated Di for EVERY piece of evidence.
+You are the Final Verdict Arbiter. Your job is to produce the final verdict by reviewing:
+1. The Neutral Agent's initial Di scores (baseline evidence assessment)
+2. The Supporter's proposed boosts (arguments for higher Di)
+3. The Skeptic's proposed penalties (arguments for lower Di)
+4. An optional visual assessment from a Vision-Language Model
+
+Your role is to accept or reject the arguments presented, and adjust the Neutral Agent's Di score according to the accepted arguments to arrive at a final score for each evidence item.
 
 CLAIM: {claim_text}
 
@@ -309,14 +352,20 @@ SUPPORTER'S PROPOSED ADJUSTMENTS:
 SKEPTIC'S PROPOSED ADJUSTMENTS:
 {skeptic_adjustments}
 
-DECISION RULES:
-- Skeptic identified a genuine logical flaw → adopt their penalty (Di shifts negative).
-- Supporter found a valid semantic link the neutral missed → adopt their boost (Di shifts positive).
-- Both propose conflicting adjustments → weigh argument quality; if stalemate, keep Neutral Di \
-  and set "stalemate": true.
-- Neither proposed an adjustment → keep Neutral Di unchanged, "stalemate": false.
+IMAGE ASSESSMENT (VLM):
+{vlm_assessment_block}
 
-ADJUSTMENT SCALE reference: ±0.1 minor | ±0.3 moderate | ±0.5 major
+DECISION RULES:
+- If Supporter/Skeptic adjustments are "None — no debate was run", accept the Neutral Di as-is. \
+  Do not invent your own adjustments.
+- Accept a Supporter boost ONLY if they identified a genuine semantic link the neutral agent missed.
+- Accept a Skeptic penalty ONLY if they identified a genuine logical flaw, bias, or misinterpretation.
+- Reject weak or speculative arguments — do not change scores just because someone argued.
+- If both sides conflict on the same item, keep the Neutral Di unchanged (stalemate: true).
+- IMAGE ASSESSMENT: most article images are decorative. Only change a score based on the image \
+  if the image EXPLICITLY supports (+0.10 to +0.25) or EXPLICITLY refutes (-0.10 to -0.25) the claim. \
+  If the image is irrelevant, decorative, or ambiguous, ignore it completely (0.0).
+- Apply the image signal to the SINGLE most visually-relevant evidence item only.
 
 Final Di must be one of: -1.0, -0.5, 0.0, 0.5, 1.0
 
@@ -326,6 +375,6 @@ Output a final Di for EVERY evidence item (1 through N). Return JSON only:
     {{"evidence_id": <1-based int>, "final_D": <one of -1.0,-0.5,0.0,0.5,1.0>, "stalemate": <bool>, "reasoning": "<one sentence>"}},
     ...
   ],
-  "debate_summary": "<2-3 sentences summarising the key debate outcome>"
+  "verdict_explanation": "<2-3 sentences explaining the final verdict. Describe evidence by its actual text/content, NOT by number. Focus on: which evidence was decisive, whether the image played a role, and why the verdict is supported/refuted/misleading. Do NOT summarize debate mechanics.>"
 }}
 """

@@ -11,6 +11,7 @@ Three modes (selected in priority order when image_url is provided):
 SigLIP scores the probability that a (image, text) pair is a match.
 Low probability → claim doesn't describe the image → potential conflict.
 """
+
 import base64
 import io
 import json
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 def _load_siglip(model_name: str):
     """Load SigLIP model and processor once, cache for reuse."""
     from transformers import AutoModel, AutoProcessor
+
     logger.info("Loading SigLIP model: %s", model_name)
     processor = AutoProcessor.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
@@ -48,6 +50,7 @@ def _decode_image(image_url: str):
         return PILImage.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
 
     import urllib.request
+
     req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=10) as r:
         return PILImage.open(io.BytesIO(r.read())).convert("RGB")
@@ -85,9 +88,15 @@ def _siglip_check(claim_text: str, image_url: str) -> dict:
         explanation = (
             f"SigLIP match probability {prob:.3f} is below threshold "
             f"{settings.siglip_threshold} — image likely does not match claim."
-            if conflict else None
+            if conflict
+            else None
         )
-        logger.debug("SigLIP score=%.3f threshold=%.3f conflict=%s", prob, settings.siglip_threshold, conflict)
+        logger.debug(
+            "SigLIP score=%.3f threshold=%.3f conflict=%s",
+            prob,
+            settings.siglip_threshold,
+            conflict,
+        )
         return {"conflict": conflict, "explanation": explanation, "siglip_score": prob}
 
     except Exception as e:
@@ -117,21 +126,26 @@ def _openai_vision_check(claim_text: str, image_url: str, api_key: str, model: s
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model=vision_model,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_url, "detail": "low"}},
-                    {"type": "text",      "text": prompt},
-                ],
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": image_url, "detail": "low"}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
             response_format={"type": "json_object"},
             temperature=0,
             max_tokens=300,
         )
         raw = response.choices[0].message.content.strip()
         result = json.loads(raw)
-        logger.debug("OpenAI vision cross-modal: conflict=%s explanation=%s",
-                     result.get("conflict"), result.get("explanation"))
+        logger.debug(
+            "OpenAI vision cross-modal: conflict=%s explanation=%s",
+            result.get("conflict"),
+            result.get("explanation"),
+        )
         return result
     except Exception as e:
         logger.warning("OpenAI vision check failed (%s) — skipping cross-modal", e)
@@ -176,8 +190,8 @@ def check_cross_modal(
         result = _llm_check(claim_text, image_caption or "", api_key, model)
 
     return {
-        "flag":         result.get("conflict", False),
-        "explanation":  result.get("explanation"),
+        "flag": result.get("conflict", False),
+        "explanation": result.get("explanation"),
         "siglip_score": siglip_score,
     }
 
@@ -192,6 +206,7 @@ def _ensure_base64_uri(image_url: str) -> Optional[str]:
         return image_url
     try:
         import urllib.request
+
         req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as r:
             content_type = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
@@ -213,18 +228,20 @@ def _vision_check(claim_text: str, image_url: str) -> Optional[dict]:
     if image_data_uri is None:
         return None
 
-    client = OpenAI(base_url=settings.ollama_base_url, api_key="ollama")
+    client = _llm_factory.make_vlm_client()
     prompt = CROSS_MODAL_VISION_PROMPT.format(claim_text=claim_text)
     try:
         response = client.chat.completions.create(
-            model=settings.ollama_llm_model,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_data_uri}},
-                    {"type": "text", "text": prompt},
-                ],
-            }],
+            model=_llm_factory.vlm_model_name(),
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": image_data_uri}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
             temperature=0,
         )
         raw = response.choices[0].message.content.strip()

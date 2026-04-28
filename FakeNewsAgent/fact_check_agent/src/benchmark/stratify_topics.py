@@ -12,6 +12,7 @@ Usage:
     --seed N      Random seed (default: 42)
     --output      Output CSV path (default: datasets/eval_dataset/eval_3k.csv)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,9 +27,9 @@ from tqdm import tqdm
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-REPO_ROOT  = Path(__file__).resolve().parents[3]
-EVAL_DIR   = REPO_ROOT / "datasets" / "eval_dataset"
-INPUT_CSV  = EVAL_DIR / "eval_6k.csv"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+EVAL_DIR = REPO_ROOT / "datasets" / "eval_dataset"
+INPUT_CSV = EVAL_DIR / "eval_6k.csv"
 CACHE_PATH = EVAL_DIR / "topic_class_cache.json"
 
 TOPICS = [
@@ -80,7 +81,7 @@ def _key(claim: str) -> str:
 
 
 def _classify_batch(claims: list[str], model: str, client: OpenAI) -> list[str]:
-    numbered = "\n".join(f"{i+1}. {c.strip()[:300]}" for i, c in enumerate(claims))
+    numbered = "\n".join(f"{i + 1}. {c.strip()[:300]}" for i, c in enumerate(claims))
     prompt = BATCH_PROMPT.format(claims=numbered)
     try:
         resp = client.chat.completions.create(
@@ -126,9 +127,11 @@ def classify_all(claims: list[str], model: str, workers: int) -> dict[str, str]:
             cache = json.load(f)
 
     pending = [c for c in claims if _key(c) not in cache]
-    batches = [pending[i: i + BATCH_SIZE] for i in range(0, len(pending), BATCH_SIZE)]
-    print(f"\nTopic classification: {len(claims)} total, {len(cache)} cached, "
-          f"{len(pending)} pending → {len(batches)} batches")
+    batches = [pending[i : i + BATCH_SIZE] for i in range(0, len(pending), BATCH_SIZE)]
+    print(
+        f"\nTopic classification: {len(claims)} total, {len(cache)} cached, "
+        f"{len(pending)} pending → {len(batches)} batches"
+    )
 
     if not batches:
         return cache
@@ -158,11 +161,11 @@ def classify_all(claims: list[str], model: str, workers: int) -> dict[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model",   default="gpt-oss:20b-cloud")
+    parser.add_argument("--model", default="gpt-oss:20b-cloud")
     parser.add_argument("--workers", type=int, default=6)
-    parser.add_argument("--target",  type=int, default=500)
-    parser.add_argument("--seed",    type=int, default=42)
-    parser.add_argument("--output",  default=str(EVAL_DIR / "eval_3k.csv"))
+    parser.add_argument("--target", type=int, default=500)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output", default=str(EVAL_DIR / "eval_3k.csv"))
     args = parser.parse_args()
 
     df = pd.read_csv(INPUT_CSV, sep="\t")
@@ -186,16 +189,16 @@ def main() -> None:
         n = min(args.target, len(bucket))
         if "verdict_label" in bucket.columns:
             # Try to balance verdict types
-            sampled = (
-                bucket.groupby("verdict_label", group_keys=False)
-                .apply(lambda g: g.sample(min(len(g), n // 3 + 1), random_state=args.seed))
+            sampled = bucket.groupby("verdict_label", group_keys=False).apply(
+                lambda g: g.sample(min(len(g), n // 3 + 1), random_state=args.seed)
             )
             if len(sampled) > n:
                 sampled = sampled.sample(n, random_state=args.seed)
             elif len(sampled) < n:
                 remaining = bucket.drop(sampled.index)
-                extra = remaining.sample(min(n - len(sampled), len(remaining)),
-                                         random_state=args.seed)
+                extra = remaining.sample(
+                    min(n - len(sampled), len(remaining)), random_state=args.seed
+                )
                 sampled = pd.concat([sampled, extra])
         else:
             sampled = bucket.sample(n, random_state=args.seed)
@@ -208,7 +211,7 @@ def main() -> None:
     out_path = Path(args.output)
     out.to_csv(out_path, sep="\t", index=False)
 
-    print(f"\n{'='*55}")
+    print(f"\n{'=' * 55}")
     print(f"Saved {len(out)} rows → {out_path}")
     print("\nFinal topic distribution:")
     for topic, count in out["topic"].value_counts().items():
