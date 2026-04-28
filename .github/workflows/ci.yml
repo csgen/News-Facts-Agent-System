@@ -97,3 +97,10 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           retention-days: 14
+      
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
