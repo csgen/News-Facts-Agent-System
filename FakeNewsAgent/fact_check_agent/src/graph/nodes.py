@@ -762,32 +762,66 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
 
 
 def cross_modal_check(state: FactCheckState, settings) -> dict:
-    """Cross-modal consistency check: SigLIP / Gemma4 vision / LLM caption (priority order)."""
-    inp = state["input"]
-    result = check_cross_modal(
-        claim_text=inp.claim_text,
-        image_caption=inp.image_caption,
-        api_key=settings.openai_api_key,
-        model=_llm_factory.llm_model_name(),
-        image_url=getattr(inp, "image_url", None),
-    )
+    """Cross-modal consistency check.
 
-    vlm_block = state.get("vlm_assessment_block") or "No image available."
+    Fast path: when vlm_assessment_node already ran, derive the conflict flag
+    directly from its assessment score — no second VLM/LLM call needed.
+    The assessment score in the block encodes image-claim alignment:
+      negative → image refutes / contradicts claim → conflict = True
+      zero/positive → image supports or is irrelevant → conflict = False
+
+    Fallback path: SigLIP → Gemma4 vision → GPT-4o vision → LLM caption text.
+    Used when no vlm_assessment_block is available (no image_url on the claim).
+    """
+    inp = state["input"]
+    vlm_block = state.get("vlm_assessment_block") or ""
+
+    siglip_score = None
+
+    if vlm_block and vlm_block != "No image available.":
+        # Parse assessment score from the block produced by vlm_assessment_node.
+        # Format: "Assessment: -0.10 (+0.25=strong visual support, ...)"
+        conflict = False
+        try:
+            for line in vlm_block.splitlines():
+                if line.startswith("Assessment:"):
+                    score_str = line.split(":")[1].strip().split()[0]
+                    score = float(score_str)
+                    conflict = score < 0.0
+                    break
+        except Exception as exc:
+            logger.warning("cross_modal_check: could not parse assessment score: %s", exc)
+
+        logger.info(
+            "cross_modal_check: derived from vlm_assessment_block conflict=%s", conflict
+        )
+    else:
+        # No VLM assessment — fall back to the full check_cross_modal tool
+        result = check_cross_modal(
+            claim_text=inp.claim_text,
+            image_caption=inp.image_caption,
+            api_key=settings.openai_api_key,
+            model=_llm_factory.llm_model_name(),
+            image_url=getattr(inp, "image_url", None),
+        )
+        conflict = result["flag"]
+        siglip_score = result.get("siglip_score")
+        vlm_block = None
 
     current_output: Optional[FactCheckOutput] = state.get("output")
     updated_output = None
     if current_output:
         updated_output = current_output.model_copy(
             update={
-                "cross_modal_flag": result["flag"],
-                "vlm_assessment_block": vlm_block if vlm_block != "No image available." else None,
+                "cross_modal_flag": conflict,
+                "vlm_assessment_block": vlm_block or None,
+                "image_url": getattr(inp, "image_url", None),
             }
         )
 
     return {
-        "cross_modal_flag": result["flag"],
-        "vlm_assessment_block": vlm_block if vlm_block != "No image available." else None,
-        "clip_similarity_score": result.get("siglip_score"),
+        "cross_modal_flag": conflict,
+        "clip_similarity_score": siglip_score,
         "output": updated_output or current_output,
     }
 
