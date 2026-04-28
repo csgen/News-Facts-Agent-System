@@ -556,34 +556,3 @@ class MemoryAgent:
         """Write (or update) the HAS_CREDIBILITY relationship in Neo4j."""
         self._graph.upsert_source_topic_credibility(source_id, topic, credibility)
 
-    def add_source_credibility_point(
-        self,
-        point_id: str,
-        claim_text: str,
-        topic_text: str,
-        source_id: str,
-        credibility: float,
-        verdict_label: str,
-        verdict_id: str,
-        created_at: str,
-    ) -> None:
-        """Append one (source, topic, credibility) observation from HITL feedback."""
-        embedding = self._embeddings.embed(topic_text)
-        self._vector.upsert_source_credibility_point(
-            point_id=point_id,
-            embedding=embedding,
-            document=topic_text,
-            source_id=source_id,
-            credibility=credibility,
-            verdict_label=verdict_label,
-            verdict_id=verdict_id,
-            created_at=created_at,
-        )
-
-    def query_source_credibility(
-        self, claim_text: str, source_id: str, k: int = 20
-    ) -> dict:
-        """Retrieve k nearest (source, topic) credibility observations."""
-        embedding = self._embeddings.embed(claim_text)
-        return self._vector.query_source_credibility(embedding, source_id=source_id, k=k)
-

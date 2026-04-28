@@ -189,7 +189,6 @@ def make_memory_mock_with_similar(claims=None):
     memory.get_verdict_by_claim.return_value = {"ids": [], "metadatas": []}
     memory.get_entity_ids_for_claims.return_value = []
     memory.get_graph_claims_for_entities.return_value = []
-    memory.query_source_credibility.return_value = {"sample_count": 0}
     memory.add_verdict.return_value = None
     return memory
 
