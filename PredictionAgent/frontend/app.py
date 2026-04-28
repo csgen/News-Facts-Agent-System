@@ -291,6 +291,29 @@ def _run_entity_tracker_background(claim_text_or_name: str, direct_name: str = "
     thread.start()
 
 
+def _format_vlm_block(block: str) -> str:
+    """Parse vlm_assessment_block into a clean, human-readable string for the UI.
+
+    Extracts Caption, Visual Evidence, and Explanation; drops the raw numeric
+    Assessment score line which is too technical for end users.
+    """
+    if not block or block.strip() == "No image available.":
+        return ""
+    parsed: dict[str, str] = {}
+    for line in block.splitlines():
+        if ":" in line:
+            key, _, val = line.partition(":")
+            parsed[key.strip()] = val.strip()
+    parts: list[str] = []
+    if parsed.get("Caption"):
+        parts.append(f"📷 {parsed['Caption']}")
+    if parsed.get("Visual Evidence"):
+        parts.append(f"🔍 Relevant: {parsed['Visual Evidence']}")
+    if parsed.get("Explanation"):
+        parts.append(f"💬 {parsed['Explanation']}")
+    return "\n".join(parts) if parts else block
+
+
 def _sources_from_evidence_links(links: list[str]) -> list[dict]:
     """Convert raw evidence URLs into the source-pill dicts the UI expects."""
     out: list[dict] = []
@@ -467,9 +490,8 @@ def get_real_verdict(query: str) -> dict:
                 "claim_text": claim_text_by_id.get(v.claim_id, ""),
                 "evidence_summary": v.reasoning,
                 "image_mismatch": getattr(v, "cross_modal_flag", False),
-                "vlm_caption": getattr(v, "vlm_assessment_block", "") or "",
-                "preprocessing_caption": prep_caption,
-                "image_url": img_url,
+                "vlm_caption": _format_vlm_block(getattr(v, "vlm_assessment_block", None)) or prep_caption,
+                "image_url": getattr(v, "image_url", "") or img_url,
                 "sources": _sources_from_evidence_links(getattr(v, "evidence_links", None) or []),
             }
         )
@@ -502,7 +524,7 @@ def get_real_verdict(query: str) -> dict:
         "evidence_summary": headline_summary,
         "image_mismatch": any(sc["image_mismatch"] for sc in sub_claims),
         "image_url": headline.get("image_url", ""),
-        "vlm_caption": headline.get("preprocessing_caption", headline["vlm_caption"]),
+        "vlm_caption": headline.get("vlm_caption", ""),
         "sources": headline["sources"],
         "charged_phrases": [],
         "claims": sub_claims,
