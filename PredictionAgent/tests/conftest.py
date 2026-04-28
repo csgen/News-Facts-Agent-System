@@ -5,6 +5,7 @@ loads `src.config.Settings` (via the memory_agent adapter), which raises if
 required env vars are missing. We seed safe placeholders here so unit tests
 never need real credentials.
 """
+
 import os
 
 os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")

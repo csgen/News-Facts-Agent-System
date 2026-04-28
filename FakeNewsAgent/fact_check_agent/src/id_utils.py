@@ -1,4 +1,5 @@
 """ID generation utilities — matches memory_agent's id_utils exactly."""
+
 import hashlib
 import uuid
 

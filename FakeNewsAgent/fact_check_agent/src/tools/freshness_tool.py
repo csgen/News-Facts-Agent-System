@@ -6,6 +6,7 @@ Two modes selected by settings.use_freshness_react:
 
 Called on every cache hit (confidence >= CACHE_CONFIDENCE_THRESHOLD).
 """
+
 import json
 import logging
 from datetime import datetime, timezone
@@ -29,9 +30,7 @@ _SEARCH_TOOL = {
         "description": "Search the web for current information about a topic",
         "parameters": {
             "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "The search query"}
-            },
+            "properties": {"query": {"type": "string", "description": "The search query"}},
             "required": ["query"],
         },
     },
@@ -84,7 +83,7 @@ def _check_freshness_react(
     )
     messages = [
         {"role": "system", "content": _REACT_SYSTEM},
-        {"role": "user",   "content": user_msg},
+        {"role": "user", "content": user_msg},
     ]
 
     client = _llm_factory.make_llm_client()
@@ -99,10 +98,23 @@ def _check_freshness_react(
         msg = response.choices[0].message
 
         if msg.tool_calls:
-            messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
-                {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in msg.tool_calls
-            ]})
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": msg.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                }
+            )
             for tc in msg.tool_calls:
                 query = json.loads(tc.function.arguments).get("query", claim_text)
                 try:
@@ -110,11 +122,13 @@ def _check_freshness_react(
                     snippets = "\n".join(r.get("content", "")[:300] for r in results[:3])
                 except Exception as search_err:
                     snippets = f"Search unavailable: {search_err}"
-                messages.append({
-                    "role":         "tool",
-                    "tool_call_id": tc.id,
-                    "content":      snippets or "No results found.",
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": snippets or "No results found.",
+                    }
+                )
         else:
             # Final answer
             raw = (msg.content or "").strip()
@@ -176,14 +190,14 @@ def check_freshness(
             result.get("reason", ""),
         )
         return {
-            "revalidate":     bool(result.get("revalidate", False)),
-            "reason":         result.get("reason", ""),
+            "revalidate": bool(result.get("revalidate", False)),
+            "reason": result.get("reason", ""),
             "claim_category": result.get("claim_category", "unknown"),
         }
     except Exception as e:
         logger.warning("freshness_tool failed (%s) — defaulting to revalidate=True", e)
         return {
-            "revalidate":     True,
-            "reason":         f"Freshness check failed ({e}); defaulting to live search.",
+            "revalidate": True,
+            "reason": f"Freshness check failed ({e}); defaulting to live search.",
             "claim_category": "unknown",
         }

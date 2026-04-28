@@ -1,4 +1,4 @@
-﻿"""
+"""
 Input Guardrail Agent
 Task 3 — Full-Stack & Evaluation Engineer
 
@@ -53,10 +53,9 @@ INJECTION_PATTERNS = [
     r"forget\s+(previous|all|above|prior)\s+instructions?",
     r"override\s+(previous|all|above|prior)\s+instructions?",
     r"do\s+not\s+follow\s+(previous|your)\s+instructions?",
-
     # Role / persona hijacking
-    r"\bDAN\b",                          # Do Anything Now jailbreak
-    r"you\s+are\s+now\s+(a\s+)?(?!fact)",# "you are now a [evil AI]" — excludes "you are now a fact-checker"
+    r"\bDAN\b",  # Do Anything Now jailbreak
+    r"you\s+are\s+now\s+(a\s+)?(?!fact)",  # "you are now a [evil AI]" — excludes "you are now a fact-checker"
     r"act\s+as\s+(if\s+you\s+are|a)\s+(?!fact)",
     r"pretend\s+(to\s+be|you\s+are)\s+(?!fact)",
     r"roleplay\s+as",
@@ -65,19 +64,15 @@ INJECTION_PATTERNS = [
     r"developer\s+mode",
     r"god\s+mode",
     r"no\s+restrictions?",
-
     # System prompt leaking
     r"(show|print|repeat|reveal|leak)\s+(me\s+)?(your\s+)?(system\s+prompt|instructions?|prompt)",
     r"what\s+(are|were)\s+your\s+(system\s+)?instructions?",
-
     # Code execution attempts
     r"(exec|eval|os\.system|subprocess|__import__)\s*\(",
     r"<\s*script\b",
     r"javascript\s*:",
-
     # Data exfiltration
     r"(send|email|post|exfil(trate)?)\s+(all\s+)?(data|information|credentials?)",
-
     # Prompt chaining attacks
     r"###\s*(instruction|system|human|assistant)",
     r"\[INST\]",
@@ -87,24 +82,26 @@ INJECTION_PATTERNS = [
 
 # PII patterns
 PII_PATTERNS = {
-    "credit_card":   r"\b(?:\d[ -]?){13,16}\b",
-    "ssn":           r"\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b",
-    "phone_us":      r"\b(\+1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
-    "email":         r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b",
+    "credit_card": r"\b(?:\d[ -]?){13,16}\b",
+    "ssn": r"\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b",
+    "phone_us": r"\b(\+1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
+    "email": r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b",
     "password_leak": r"(password|passwd|pwd)\s*[:=]\s*\S+",
-    "api_key":       r"(sk-|AIza|AKIA|Bearer\s)[A-Za-z0-9_\-]{16,}",
+    "api_key": r"(sk-|AIza|AKIA|Bearer\s)[A-Za-z0-9_\-]{16,}",
 }
 
 # Hate speech / abuse (basic keyword set — production would use a classifier)
 HATE_KEYWORDS = [
-    r"\bkill\s+all\b", r"\bexterminate\b", r"\bslur\b",
+    r"\bkill\s+all\b",
+    r"\bexterminate\b",
+    r"\bslur\b",
     r"\bsuicide\s+(method|how|instructions?)\b",
     r"\bhow\s+to\s+(make|build|create)\s+(a\s+)?(bomb|weapon|poison|malware|virus)\b",
 ]
 
-MIN_LENGTH = 5          # characters
-MAX_LENGTH = 5_000      # characters
-MIN_ALPHA_RATIO = 0.4   # fraction of letters in text (gibberish guard)
+MIN_LENGTH = 5  # characters
+MAX_LENGTH = 5_000  # characters
+MIN_ALPHA_RATIO = 0.4  # fraction of letters in text (gibberish guard)
 
 
 def _check_injection(text: str) -> Optional[str]:
@@ -152,11 +149,11 @@ def _check_gibberish(text: str) -> Optional[str]:
 def layer_a_check(text: str) -> dict:
     """Run all rule-based checks. Returns first failure found."""
     checks = [
-        ("length",    _check_length),
+        ("length", _check_length),
         ("gibberish", _check_gibberish),
         ("injection", _check_injection),
-        ("pii",       _check_pii),
-        ("hate",      _check_hate),
+        ("pii", _check_pii),
+        ("hate", _check_hate),
     ]
     for check_name, fn in checks:
         reason = fn(text)
@@ -207,6 +204,7 @@ def layer_b_check(text: str) -> dict:
         # Try loading .env from the PredictionAgent root
         try:
             from dotenv import load_dotenv
+
             _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             load_dotenv(os.path.join(_here, ".env"), override=False)
         except ImportError:
@@ -216,6 +214,7 @@ def layer_b_check(text: str) -> dict:
         if not api_key:
             try:
                 from config import settings
+
                 api_key = settings.openai_api_key
             except ImportError:
                 pass
@@ -235,8 +234,8 @@ def layer_b_check(text: str) -> dict:
         print(f"[guardrail.B] LLM response: {raw!r}")
 
         verdict = "SAFE"
-        risk    = "NONE"
-        reason  = "Classified as safe"
+        risk = "NONE"
+        reason = "Classified as safe"
 
         for line in raw.splitlines():
             if line.startswith("VERDICT:"):
@@ -264,6 +263,7 @@ def layer_b_check(text: str) -> dict:
 # PUBLIC API
 # ─────────────────────────────────────────────
 
+
 def check_input(text: str) -> dict:
     """
     Run both guardrail layers.
@@ -278,7 +278,10 @@ def check_input(text: str) -> dict:
         _input_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         _blocked_logger.warning(
             "BLOCKED | hash=%s | layer=%s | risk=%s | reason=%s",
-            _input_hash, result_a["layer"], result_a["risk"], result_a["reason"],
+            _input_hash,
+            result_a["layer"],
+            result_a["risk"],
+            result_a["reason"],
         )
         return result_a
 
@@ -288,7 +291,9 @@ def check_input(text: str) -> dict:
         _input_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         _blocked_logger.warning(
             "BLOCKED | hash=%s | layer=%s | risk=%s | reason=%s",
-            _input_hash, result_b["layer"], result_b["risk"], result_b["reason"],
+            _input_hash,
+            result_b["layer"],
+            result_b["risk"],
+            result_b["reason"],
         )
     return result_b
-

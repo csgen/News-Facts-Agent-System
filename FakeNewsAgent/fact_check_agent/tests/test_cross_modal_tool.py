@@ -4,6 +4,7 @@ Unit tests: mocked — no API keys, Ollama, or model downloads required.
 SigLIP integration: runs locally (transformers + torch), no external services.
 Ollama integration: marked `requires_ollama`, auto-skipped when Ollama is down.
 """
+
 import base64
 import io
 import json
@@ -19,9 +20,11 @@ from fact_check_agent.src.tools.cross_modal_tool import (
 
 # ── Shared test image factory ─────────────────────────────────────────────────
 
+
 def _make_image_uri(color=(200, 60, 20), labels=None, size=(200, 120)) -> str:
     """Return a base64 data URI for a simple PIL test image."""
     from PIL import Image, ImageDraw
+
     img = Image.new("RGB", size, color=color)
     if labels:
         d = ImageDraw.Draw(img)
@@ -35,6 +38,7 @@ def _make_image_uri(color=(200, 60, 20), labels=None, size=(200, 120)) -> str:
 def _ollama_running() -> bool:
     try:
         import urllib.request
+
         urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
         return True
     except Exception:
@@ -49,6 +53,7 @@ requires_ollama = pytest.mark.skipif(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _mock_llm_response(conflict: bool, explanation=None):
     content = json.dumps({"conflict": conflict, "explanation": explanation})
     choice = MagicMock()
@@ -59,6 +64,7 @@ def _mock_llm_response(conflict: bool, explanation=None):
 
 
 # ── Unit: no image data ───────────────────────────────────────────────────────
+
 
 def test_no_image_data_returns_no_flag():
     result = check_cross_modal(
@@ -78,13 +84,15 @@ def test_empty_caption_no_url_returns_no_flag():
 
 # ── Unit: caption-based LLM path ──────────────────────────────────────────────
 
+
 def test_caption_path_no_conflict():
     with patch("fact_check_agent.src.llm_factory.make_llm_client") as mk:
         mk.return_value.chat.completions.create.return_value = _mock_llm_response(False)
         result = check_cross_modal(
             claim_text="Vaccines are safe.",
             image_caption="Doctor administering vaccine to patient.",
-            api_key="k", model="gpt-4o",
+            api_key="k",
+            model="gpt-4o",
         )
     assert result["flag"] is False
     assert result["siglip_score"] is None
@@ -98,7 +106,8 @@ def test_caption_path_conflict():
         result = check_cross_modal(
             claim_text="The rally was peaceful.",
             image_caption="Police disperse violent crowd.",
-            api_key="k", model="gpt-4o",
+            api_key="k",
+            model="gpt-4o",
         )
     assert result["flag"] is True
     assert result["explanation"] is not None
@@ -115,17 +124,23 @@ def test_caption_path_llm_failure_degrades_gracefully():
 
 # ── Unit: dispatch routing ────────────────────────────────────────────────────
 
+
 def test_siglip_path_takes_priority_over_vision():
     """use_siglip=True routes to _siglip_check regardless of llm_provider."""
-    with patch("fact_check_agent.src.tools.cross_modal_tool.settings") as ms, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._siglip_check") as msiglip, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._vision_check") as mvision, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._llm_check") as mllm:
+    with (
+        patch("fact_check_agent.src.tools.cross_modal_tool.settings") as ms,
+        patch("fact_check_agent.src.tools.cross_modal_tool._siglip_check") as msiglip,
+        patch("fact_check_agent.src.tools.cross_modal_tool._vision_check") as mvision,
+        patch("fact_check_agent.src.tools.cross_modal_tool._llm_check") as mllm,
+    ):
         ms.use_siglip = True
         ms.llm_provider = "ollama"
         msiglip.return_value = {"conflict": False, "explanation": None, "siglip_score": 0.8}
         check_cross_modal(
-            claim_text="A claim", image_caption=None, api_key="", model="",
+            claim_text="A claim",
+            image_caption=None,
+            api_key="",
+            model="",
             image_url="data:image/jpeg;base64,/9j/fake",
         )
     msiglip.assert_called_once()
@@ -135,15 +150,20 @@ def test_siglip_path_takes_priority_over_vision():
 
 def test_vision_path_when_siglip_disabled_and_ollama():
     """use_siglip=False + ollama provider → _vision_check."""
-    with patch("fact_check_agent.src.tools.cross_modal_tool.settings") as ms, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._siglip_check") as msiglip, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._vision_check") as mvision, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._llm_check") as mllm:
+    with (
+        patch("fact_check_agent.src.tools.cross_modal_tool.settings") as ms,
+        patch("fact_check_agent.src.tools.cross_modal_tool._siglip_check") as msiglip,
+        patch("fact_check_agent.src.tools.cross_modal_tool._vision_check") as mvision,
+        patch("fact_check_agent.src.tools.cross_modal_tool._llm_check") as mllm,
+    ):
         ms.use_siglip = False
         ms.llm_provider = "ollama"
         mvision.return_value = {"conflict": False, "explanation": None}
         check_cross_modal(
-            claim_text="A claim", image_caption=None, api_key="", model="",
+            claim_text="A claim",
+            image_caption=None,
+            api_key="",
+            model="",
             image_url="data:image/jpeg;base64,/9j/fake",
         )
     msiglip.assert_not_called()
@@ -153,15 +173,20 @@ def test_vision_path_when_siglip_disabled_and_ollama():
 
 def test_llm_caption_path_when_no_image_url():
     """No image_url → _llm_check regardless of provider."""
-    with patch("fact_check_agent.src.tools.cross_modal_tool.settings") as ms, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._siglip_check") as msiglip, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._vision_check") as mvision, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._llm_check") as mllm:
+    with (
+        patch("fact_check_agent.src.tools.cross_modal_tool.settings") as ms,
+        patch("fact_check_agent.src.tools.cross_modal_tool._siglip_check") as msiglip,
+        patch("fact_check_agent.src.tools.cross_modal_tool._vision_check") as mvision,
+        patch("fact_check_agent.src.tools.cross_modal_tool._llm_check") as mllm,
+    ):
         ms.use_siglip = True
         ms.llm_provider = "ollama"
         mllm.return_value = {"conflict": False, "explanation": None}
         check_cross_modal(
-            claim_text="A claim", image_caption="A caption", api_key="k", model="m",
+            claim_text="A claim",
+            image_caption="A caption",
+            api_key="k",
+            model="m",
         )
     msiglip.assert_not_called()
     mvision.assert_not_called()
@@ -170,13 +195,18 @@ def test_llm_caption_path_when_no_image_url():
 
 def test_siglip_score_surfaces_in_return_value():
     """siglip_score from _siglip_check is passed through to the caller."""
-    with patch("fact_check_agent.src.tools.cross_modal_tool.settings") as ms, \
-         patch("fact_check_agent.src.tools.cross_modal_tool._siglip_check") as msiglip:
+    with (
+        patch("fact_check_agent.src.tools.cross_modal_tool.settings") as ms,
+        patch("fact_check_agent.src.tools.cross_modal_tool._siglip_check") as msiglip,
+    ):
         ms.use_siglip = True
         ms.llm_provider = "openai"
         msiglip.return_value = {"conflict": True, "explanation": "low score", "siglip_score": 0.04}
         result = check_cross_modal(
-            claim_text="A claim", image_caption=None, api_key="", model="",
+            claim_text="A claim",
+            image_caption=None,
+            api_key="",
+            model="",
             image_url="data:image/jpeg;base64,/9j/fake",
         )
     assert result["flag"] is True
@@ -208,6 +238,7 @@ _PORTRAIT = "/home/shantam/Downloads/portrait_photo.jpg"
 
 def _real_image_uri(path: str) -> str:
     import base64
+
     with open(path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
     return f"data:image/jpeg;base64,{b64}"
@@ -274,6 +305,7 @@ def test_siglip_portrait_wildfire_mismatch():
 def test_siglip_model_cached_across_calls():
     """_load_siglip is called only once even for multiple checks (lru_cache)."""
     from fact_check_agent.src.tools.cross_modal_tool import _load_siglip
+
     uri = _real_image_uri(_GRACE_HOPPER)
     _siglip_check("first call", uri)
     before = _load_siglip.cache_info()
@@ -293,6 +325,7 @@ def test_siglip_graceful_fallback_on_bad_image():
 
 
 # ── Integration: Gemma 4 vision via Ollama ────────────────────────────────────
+
 
 @requires_ollama
 def test_vision_check_returns_valid_json_shape():

@@ -19,6 +19,7 @@ Usage:
     --workers    N                Parallel download threads (default: 16)
     --timeout    N                Per-request timeout in seconds (default: 10)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,23 +37,21 @@ from tqdm import tqdm
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-DATASET_ROOT = (
-    Path(__file__).resolve().parents[3] / "datasets" / "Factify2" / "Factify 2"
-)
+DATASET_ROOT = Path(__file__).resolve().parents[3] / "datasets" / "Factify2" / "Factify 2"
 IMAGES_DIR = DATASET_ROOT.parent / "images"
 MAPPING_PATH = DATASET_ROOT.parent / "url_to_local.json"
 
 SPLIT_PATHS = {
     "train": DATASET_ROOT / "factify2_train" / "factify2" / "train.csv",
-    "val":   DATASET_ROOT / "factify2_train" / "factify2" / "val.csv",
-    "test":  DATASET_ROOT / "factify2_test"  / "test.csv",
+    "val": DATASET_ROOT / "factify2_train" / "factify2" / "val.csv",
+    "test": DATASET_ROOT / "factify2_test" / "test.csv",
 }
 
 # Curated output lives alongside the originals
 CURATED_PATHS = {
     "train": DATASET_ROOT / "factify2_train" / "factify2" / "train_curated.csv",
-    "val":   DATASET_ROOT / "factify2_train" / "factify2" / "val_curated.csv",
-    "test":  DATASET_ROOT / "factify2_test"  / "test_curated.csv",
+    "val": DATASET_ROOT / "factify2_train" / "factify2" / "val_curated.csv",
+    "test": DATASET_ROOT / "factify2_test" / "test_curated.csv",
 }
 
 IMAGE_COLUMNS = ["claim_image", "document_image"]
@@ -178,12 +177,15 @@ def curate(splits: list[str], mapping: dict[str, str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Pre-fetch Factify2 images and curate dataset.")
-    parser.add_argument("--splits", default="val,test",
-                        help="Comma-separated splits (default: val,test)")
-    parser.add_argument("--workers", type=int, default=16,
-                        help="Parallel download threads (default: 16)")
-    parser.add_argument("--timeout", type=int, default=10,
-                        help="Per-request timeout in seconds (default: 10)")
+    parser.add_argument(
+        "--splits", default="val,test", help="Comma-separated splits (default: val,test)"
+    )
+    parser.add_argument(
+        "--workers", type=int, default=16, help="Parallel download threads (default: 16)"
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=10, help="Per-request timeout in seconds (default: 10)"
+    )
     args = parser.parse_args()
 
     splits = [s.strip() for s in args.splits.split(",")]

@@ -7,6 +7,7 @@ tests run fast and require no external services. They cover:
     - Monotonically falling series → FALLING
     - High-variance series         → VOLATILE
 """
+
 from agents.prediction_agent import analyse_trend
 
 

@@ -1,4 +1,5 @@
 """Routing functions for the LangGraph conditional edges."""
+
 from fact_check_agent.src.config import settings
 from fact_check_agent.src.models.state import FactCheckState
 

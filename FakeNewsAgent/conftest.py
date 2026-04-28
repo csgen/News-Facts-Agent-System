@@ -6,6 +6,7 @@ The top-level `pytest.ini` already adds the right paths to PYTHONPATH; this
 file only sets default env vars so tests that touch `src.config.Settings`
 don't fail at import time on missing required fields.
 """
+
 import os
 
 # Required by `src.config.Settings` (raises if missing). Use safe placeholders;

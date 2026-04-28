@@ -4,6 +4,7 @@ Standalone pydantic-settings config — all fields declared here directly.
 Memory-agent's Settings is no longer inherited to avoid the bare-`src`
 namespace collision between fact_check_agent/src and memory_agent/src.
 """
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,21 +48,23 @@ class Settings(BaseSettings):
 
     # Ollama settings (only used when *_provider = "ollama")
     ollama_base_url: str = "http://localhost:11434/v1"
-    ollama_api_key: str = ""               # leave blank for local Ollama; set for Ollama Cloud
+    ollama_api_key: str = ""  # leave blank for local Ollama; set for Ollama Cloud
     ollama_llm_model: str = "gemma4:31b-cloud"
     ollama_embedding_model: str = "nomic-embed-text"
-    ollama_vlm_model: str = ""             # vision-language model for caption generation; leave blank to skip
+    ollama_vlm_model: str = ""  # vision-language model for caption generation; leave blank to skip
 
     # Retrieval enhancements
-    use_graph_rag: bool = False       # enable Neo4j entity-claim traversal in query_memory
-    use_cross_encoder: bool = False   # rerank merged results with cross-encoder (requires sentence-transformers)
+    use_graph_rag: bool = False  # enable Neo4j entity-claim traversal in query_memory
+    use_cross_encoder: bool = (
+        False  # rerank merged results with cross-encoder (requires sentence-transformers)
+    )
     cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    reranker_top_k: int = 5           # final number of chunks passed to synthesizer
+    reranker_top_k: int = 5  # final number of chunks passed to synthesizer
 
     # Cross-modal consistency — SigLIP
-    use_siglip: bool = False          # use SigLIP embedding similarity instead of VLM for image check
+    use_siglip: bool = False  # use SigLIP embedding similarity instead of VLM for image check
     siglip_model: str = "google/siglip-base-patch16-224"
-    siglip_threshold: float = 0.10    # sigmoid probability below this → conflict flagged
+    siglip_threshold: float = 0.10  # sigmoid probability below this → conflict flagged
 
     # S2 — Adaptive Retrieval Gate
     use_retrieval_gate: bool = False  # ask LLM if live search is needed before calling Tavily
@@ -70,15 +73,15 @@ class Settings(BaseSettings):
     use_claim_decomposition: bool = False  # split compound claims before retrieval
 
     # S4 — Multi-Agent Debate
-    use_debate: bool = False               # enable advocate/arbiter debate for low-confidence verdicts
+    use_debate: bool = False  # enable advocate/arbiter debate for low-confidence verdicts
     debate_confidence_threshold: int = 70  # trigger debate when confidence_score < this value
 
     # S6 — Freshness ReAct Agent
-    use_freshness_react: bool = False      # replace single LLM call with tool-calling ReAct loop
+    use_freshness_react: bool = False  # replace single LLM call with tool-calling ReAct loop
 
     # Benchmark / evaluation
-    dry_run: bool = False                  # skip all DB writes (ChromaDB + Neo4j) during benchmark runs
-    offline_mode: bool = False             # skip all DB reads+writes — implies dry_run; no Docker needed
+    dry_run: bool = False  # skip all DB writes (ChromaDB + Neo4j) during benchmark runs
+    offline_mode: bool = False  # skip all DB reads+writes — implies dry_run; no Docker needed
 
     # LangSmith tracing
     langchain_tracing_v2: bool = False

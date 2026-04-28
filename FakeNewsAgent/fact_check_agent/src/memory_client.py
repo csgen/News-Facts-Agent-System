@@ -11,6 +11,7 @@ Usage:
     ...
     close_memory()          # call at process shutdown to close Neo4j driver
 """
+
 import logging
 
 from src.config import settings as _memory_settings  # memory_agent settings

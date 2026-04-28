@@ -14,6 +14,7 @@ This file lives in the integrated monorepo and bridges the three subfolders
 by adjusting sys.path so `src.*` (scraper) and `fact_check_agent.src.*`
 (FakeNewsAgent) resolve from this process.
 """
+
 import logging
 import sys
 from datetime import datetime, timezone
@@ -47,6 +48,7 @@ def _get_graph():
     global _graph
     if _graph is None:
         from fact_check_agent.src.graph.graph import build_graph
+
         _graph = build_graph(get_memory())
     return _graph
 

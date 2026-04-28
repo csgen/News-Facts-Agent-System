@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # SCORING LOGIC (original from Task 3 — unchanged)
 # ─────────────────────────────────────────────
 
+
 def compute_credibility_score(claims: list[dict]) -> float:
     """
     Recency-weighted credibility score with Bayesian volume shrinkage.
@@ -58,11 +59,11 @@ def compute_credibility_score(claims: list[dict]) -> float:
     LABEL_SCORES = {"supported": 1.0, "misleading": 0.35, "refuted": 0.0}
 
     now = datetime.now(timezone.utc)
-    weighted_sum  = 0.0
-    total_weight  = 0.0
+    weighted_sum = 0.0
+    total_weight = 0.0
 
     for c in claims:
-        conf  = float(c.get("verdict_confidence") or 0.5)
+        conf = float(c.get("verdict_confidence") or 0.5)
         label = (c.get("verdict_label") or "misleading").lower()
         score = LABEL_SCORES.get(label, 0.35)
 
@@ -85,7 +86,7 @@ def compute_credibility_score(claims: list[dict]) -> float:
             days_ago = 0.0
 
         time_decay = math.exp(-LAMBDA * max(days_ago, 0.0))
-        weight     = conf * time_decay
+        weight = conf * time_decay
 
         weighted_sum += score * weight
         total_weight += weight
@@ -93,9 +94,9 @@ def compute_credibility_score(claims: list[dict]) -> float:
     evidence = weighted_sum / total_weight if total_weight > 0 else 0.5
 
     # Bayesian shrinkage toward 0.5 when n is small
-    n             = len(claims)
+    n = len(claims)
     volume_factor = 1.0 - math.exp(-n / 3.0)
-    credibility   = 0.5 * (1 - volume_factor) + evidence * volume_factor
+    credibility = 0.5 * (1 - volume_factor) + evidence * volume_factor
 
     return round(credibility, 4)
 
@@ -112,7 +113,7 @@ def compute_sentiment_score(claims: list[dict]) -> float:
 
     HALF_LIFE_DAYS = 14.0
     LAMBDA = math.log(2) / HALF_LIFE_DAYS
-    SENTIMENT_MAP  = {"positive": 1.0, "neutral": 0.0, "negative": -1.0}
+    SENTIMENT_MAP = {"positive": 1.0, "neutral": 0.0, "negative": -1.0}
 
     now = datetime.now(timezone.utc)
     weighted_sum = 0.0
@@ -149,8 +150,10 @@ def compute_sentiment_score(claims: list[dict]) -> float:
 # MAIN AGENT FUNCTION
 # ─────────────────────────────────────────────
 
-def run_entity_tracker(entity_name: str, window_hours: int = 24,
-                       memory: Optional[MemoryAgent] = None) -> Optional[CredibilitySnapshot]:
+
+def run_entity_tracker(
+    entity_name: str, window_hours: int = 24, memory: Optional[MemoryAgent] = None
+) -> Optional[CredibilitySnapshot]:
     """
     Main function of the Entity Tracker Agent.
 
@@ -169,10 +172,10 @@ def run_entity_tracker(entity_name: str, window_hours: int = 24,
     if memory is None:
         memory = get_memory()
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Entity Tracker Agent — Running for: '{entity_name}'")
     print(f"  Window: last {window_hours} hours")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # ── Step 1: Find the entity ──
     print("\n[1/5] Looking up entity in Graph DB...")
@@ -181,10 +184,10 @@ def run_entity_tracker(entity_name: str, window_hours: int = 24,
         print(f"  ERROR: Entity '{entity_name}' not found in Graph DB. Skipping.")
         return None
 
-    entity_id          = entity_dict["entity_id"]
+    entity_id = entity_dict["entity_id"]
     current_credibility = entity_dict.get("current_credibility", 0.5)
-    total_claims        = entity_dict.get("total_claims") or 0
-    accurate_claims     = entity_dict.get("accurate_claims") or 0
+    total_claims = entity_dict.get("total_claims") or 0
+    accurate_claims = entity_dict.get("accurate_claims") or 0
     print(f"  Found: {entity_dict['name']} (id: {entity_id})")
 
     # ── Step 2: Pull recent claims ──
@@ -208,41 +211,45 @@ def run_entity_tracker(entity_name: str, window_hours: int = 24,
     # ── Step 3: Compute scores ──
     print("\n[3/5] Computing scores...")
     credibility_score = compute_credibility_score(claims)
-    sentiment_score   = compute_sentiment_score(claims)
+    sentiment_score = compute_sentiment_score(claims)
     print(f"  Credibility score : {credibility_score:.4f}")
     print(f"  Sentiment score   : {sentiment_score:.4f}")
 
     drift = credibility_score - current_credibility
     if abs(drift) > 0.1:
         direction = "DROP" if drift < 0 else "RISE"
-        print(f"  ALERT: Significant credibility {direction} detected! "
-              f"({current_credibility:.2f} → {credibility_score:.2f})")
+        print(
+            f"  ALERT: Significant credibility {direction} detected! "
+            f"({current_credibility:.2f} → {credibility_score:.2f})"
+        )
 
     # ── Step 4: Write snapshot ──
     print("\n[4/5] Writing CredibilitySnapshot to Graph DB...")
     snapshot = CredibilitySnapshot(
-        snapshot_id       = make_id("snap_"),
-        entity_id         = entity_id,
-        credibility_score = credibility_score,
-        sentiment_score   = sentiment_score,
-        snapshot_at       = datetime.now(),
+        snapshot_id=make_id("snap_"),
+        entity_id=entity_id,
+        credibility_score=credibility_score,
+        sentiment_score=sentiment_score,
+        snapshot_at=datetime.now(),
     )
     memory.add_credibility_snapshot(snapshot)
     print(f"  Snapshot {snapshot.snapshot_id} written.")
 
     # ── Step 5: Update entity aggregates ──
     print("\n[5/5] Updating Entity aggregate fields in Graph DB...")
-    new_total    = total_claims + len(claims)
+    new_total = total_claims + len(claims)
     new_accurate = accurate_claims + label_counts["supported"]
     memory.update_entity(
         entity_id,
-        total_claims        = new_total,
-        accurate_claims     = new_accurate,
-        current_credibility = credibility_score,
-        last_seen           = datetime.now().isoformat(),
+        total_claims=new_total,
+        accurate_claims=new_accurate,
+        current_credibility=credibility_score,
+        last_seen=datetime.now().isoformat(),
     )
-    print(f"  total_claims={new_total}, accurate_claims={new_accurate}, "
-          f"current_credibility={credibility_score:.4f}")
+    print(
+        f"  total_claims={new_total}, accurate_claims={new_accurate}, "
+        f"current_credibility={credibility_score:.4f}"
+    )
 
     print(f"\nEntity Tracker complete for '{entity_name}'")
     print(f"   Snapshot ID: {snapshot.snapshot_id}")
@@ -251,9 +258,12 @@ def run_entity_tracker(entity_name: str, window_hours: int = 24,
     # ── Auto-run Prediction Agent if enough snapshots exist ──
     try:
         from agents.prediction_agent import run_prediction_agent
+
         all_snaps = memory.get_entity_snapshots(entity_id, limit=20)
         if len(all_snaps) >= 3:
-            print(f"\n[entity_tracker] {len(all_snaps)} snapshots available — running prediction agent")
+            print(
+                f"\n[entity_tracker] {len(all_snaps)} snapshots available — running prediction agent"
+            )
             run_prediction_agent(entity_name, memory=memory)
         else:
             print(f"\n[entity_tracker] Only {len(all_snaps)} snapshot(s) — prediction needs 3+")
@@ -263,29 +273,30 @@ def run_entity_tracker(entity_name: str, window_hours: int = 24,
     return snapshot
 
 
-def run_batch_tracker(entity_names: list[str], window_hours: int = 24,
-                      memory: Optional[MemoryAgent] = None) -> dict:
+def run_batch_tracker(
+    entity_names: list[str], window_hours: int = 24, memory: Optional[MemoryAgent] = None
+) -> dict:
     """Run the Entity Tracker for a list of entities."""
     if memory is None:
         memory = get_memory()
 
-    print(f"\n{'#'*60}")
+    print(f"\n{'#' * 60}")
     print(f"  BATCH TRACKER — {len(entity_names)} entities")
-    print(f"{'#'*60}")
+    print(f"{'#' * 60}")
 
     results = {}
     for name in entity_names:
         snapshot = run_entity_tracker(name, window_hours, memory)
         results[name] = snapshot
 
-    print(f"\n{'#'*60}")
+    print(f"\n{'#' * 60}")
     print("  BATCH COMPLETE")
     for name, snap in results.items():
         if snap:
             print(f"  OK {name}: credibility={snap.credibility_score:.2%}")
         else:
             print(f"  SKIP {name}: no data")
-    print(f"{'#'*60}\n")
+    print(f"{'#' * 60}\n")
     return results
 
 

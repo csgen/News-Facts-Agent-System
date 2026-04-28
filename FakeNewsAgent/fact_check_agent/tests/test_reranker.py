@@ -6,6 +6,7 @@ Covers:
   - rerank_candidates: RRF-only, RRF+cross-encoder, single list, empty input
   - query_memory node: USE_GRAPH_RAG flag, USE_CROSS_ENCODER flag, verdict revision
 """
+
 import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -19,8 +20,14 @@ from fact_check_agent.src.tools.reranker import (
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def make_claim(claim_id, claim_text="test claim", verdict_label="supported",
-               verdict_confidence=0.8, distance=0.2):
+
+def make_claim(
+    claim_id,
+    claim_text="test claim",
+    verdict_label="supported",
+    verdict_confidence=0.8,
+    distance=0.2,
+):
     return {
         "claim_id": claim_id,
         "claim_text": claim_text,
@@ -32,6 +39,7 @@ def make_claim(claim_id, claim_text="test claim", verdict_label="supported",
 
 
 # ── reciprocal_rank_fusion ────────────────────────────────────────────────────
+
 
 def test_rrf_single_list_preserves_order():
     items = [make_claim(f"c{i}") for i in range(3)]
@@ -77,9 +85,10 @@ def test_rrf_one_empty_one_populated():
 
 # ── rerank_candidates ─────────────────────────────────────────────────────────
 
+
 def test_rerank_candidates_rrf_only_no_cross_encoder():
     vector = [make_claim("c1"), make_claim("c2"), make_claim("c3")]
-    graph  = [make_claim("c4"), make_claim("c1")]  # c1 appears in both
+    graph = [make_claim("c4"), make_claim("c1")]  # c1 appears in both
     result = rerank_candidates(
         query="test query",
         vector_results=vector,
@@ -172,15 +181,16 @@ def test_rerank_candidates_cross_encoder_fallback_on_error():
 
 # ── query_memory node with GraphRAG flags ─────────────────────────────────────
 
+
 def make_memory_mock_with_similar(claims=None):
     memory = MagicMock()
     claims = claims or []
-    ids       = [c["claim_id"] for c in claims]
-    docs      = [c["claim_text"] for c in claims]
+    ids = [c["claim_id"] for c in claims]
+    docs = [c["claim_text"] for c in claims]
     distances = [c.get("distance", 0.2) for c in claims]
 
     memory.search_similar_claims.return_value = {
-        "ids":       [ids],
+        "ids": [ids],
         "documents": [docs],
         "distances": [distances],
         "metadatas": [[{} for _ in claims]],
@@ -202,17 +212,18 @@ def _make_settings(use_graph_rag=False, use_cross_encoder=False, top_k=5):
     here, causing tests to fail with "expected call ... Called 0 times."
     """
     s = MagicMock()
-    s.use_graph_rag       = use_graph_rag
-    s.use_cross_encoder   = use_cross_encoder
+    s.use_graph_rag = use_graph_rag
+    s.use_cross_encoder = use_cross_encoder
     s.cross_encoder_model = "" if not use_cross_encoder else "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    s.reranker_top_k      = top_k
-    s.offline_mode        = False
-    s.dry_run             = False
+    s.reranker_top_k = top_k
+    s.offline_mode = False
+    s.dry_run = False
     return s
 
 
 def make_fci(claim_id="clm_001", claim_text="vaccines cause autism"):
     from fact_check_agent.src.models.schemas import FactCheckInput
+
     return FactCheckInput(
         claim_id=claim_id,
         claim_text=claim_text,
@@ -228,12 +239,14 @@ def test_query_memory_graph_rag_disabled_no_graph_calls():
     """With USE_GRAPH_RAG=false, entity expansion methods are never called."""
     from fact_check_agent.src.graph.nodes import query_memory
 
-    memory   = make_memory_mock_with_similar()
+    memory = make_memory_mock_with_similar()
     settings = _make_settings(use_graph_rag=False)
 
     state = {"input": make_fci()}
-    with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
-               return_value={"sample_count": 0}):
+    with patch(
+        "fact_check_agent.src.agents.reflection_agent.query_source_credibility",
+        return_value={"sample_count": 0},
+    ):
         query_memory(state, memory, settings)
 
     memory.get_entity_ids_for_claims.assert_not_called()
@@ -245,10 +258,8 @@ def test_query_memory_graph_rag_enabled_calls_entity_expansion():
     from fact_check_agent.src.graph.nodes import query_memory
 
     similar = [make_claim("c1", "vaccines cause autism")]
-    memory  = make_memory_mock_with_similar(similar)
-    memory.get_entity_ids_for_claims.return_value = [
-        {"entity_id": "ent_1", "name": "WHO"}
-    ]
+    memory = make_memory_mock_with_similar(similar)
+    memory.get_entity_ids_for_claims.return_value = [{"entity_id": "ent_1", "name": "WHO"}]
     memory.get_graph_claims_for_entities.return_value = [
         make_claim("c2", "vaccines are safe", distance=0.0)
     ]
@@ -256,8 +267,10 @@ def test_query_memory_graph_rag_enabled_calls_entity_expansion():
     settings = _make_settings(use_graph_rag=True)
 
     state = {"input": make_fci()}
-    with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
-               return_value={"sample_count": 0}):
+    with patch(
+        "fact_check_agent.src.agents.reflection_agent.query_source_credibility",
+        return_value={"sample_count": 0},
+    ):
         result = query_memory(state, memory, settings)
 
     memory.get_entity_ids_for_claims.assert_called_once_with(["c1"])
@@ -272,12 +285,14 @@ def test_query_memory_graph_rag_no_vector_results_skips_expansion():
     """With USE_GRAPH_RAG=true but no vector results, graph expansion is skipped."""
     from fact_check_agent.src.graph.nodes import query_memory
 
-    memory   = make_memory_mock_with_similar([])  # empty vector results
+    memory = make_memory_mock_with_similar([])  # empty vector results
     settings = _make_settings(use_graph_rag=True)
 
     state = {"input": make_fci()}
-    with patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
-               return_value={"sample_count": 0}):
+    with patch(
+        "fact_check_agent.src.agents.reflection_agent.query_source_credibility",
+        return_value={"sample_count": 0},
+    ):
         query_memory(state, memory, settings)
 
     memory.get_entity_ids_for_claims.assert_not_called()
@@ -288,14 +303,18 @@ def test_query_memory_cross_encoder_called_when_flag_set():
     from fact_check_agent.src.graph.nodes import query_memory
 
     similar = [make_claim("c1"), make_claim("c2")]
-    memory  = make_memory_mock_with_similar(similar)
+    memory = make_memory_mock_with_similar(similar)
 
     settings = _make_settings(use_cross_encoder=True)
 
     state = {"input": make_fci()}
-    with patch("fact_check_agent.src.tools.reranker._load_cross_encoder") as mock_load, \
-         patch("fact_check_agent.src.agents.reflection_agent.query_source_credibility",
-               return_value={"sample_count": 0}):
+    with (
+        patch("fact_check_agent.src.tools.reranker._load_cross_encoder") as mock_load,
+        patch(
+            "fact_check_agent.src.agents.reflection_agent.query_source_credibility",
+            return_value={"sample_count": 0},
+        ),
+    ):
         mock_model = MagicMock()
         mock_model.predict.return_value = [0.8, 0.5]
         mock_load.return_value = mock_model
@@ -306,21 +325,28 @@ def test_query_memory_cross_encoder_called_when_flag_set():
 
 # ── Verdict revision ──────────────────────────────────────────────────────────
 
+
 def _ensure_memory_agent_env():
     """Set minimum env vars so memory_agent Settings() can be instantiated."""
     import os
-    os.environ.setdefault("NEO4J_URI",        "bolt://localhost:7687")
-    os.environ.setdefault("NEO4J_PASSWORD",   "fakenews123")
-    os.environ.setdefault("OPENAI_API_KEY",   "unused")
+
+    os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
+    os.environ.setdefault("NEO4J_PASSWORD", "fakenews123")
+    os.environ.setdefault("OPENAI_API_KEY", "unused")
 
 
 def _stub_missing_modules():
     """Stub heavy/unavailable deps so src.memory.agent can be imported in CI."""
     import sys
     from unittest.mock import MagicMock as _M
+
     for mod in [
-        "google.genai", "rapidfuzz", "rapidfuzz.fuzz", "rapidfuzz.process",
-        "neo4j", "chromadb",
+        "google.genai",
+        "rapidfuzz",
+        "rapidfuzz.fuzz",
+        "rapidfuzz.process",
+        "neo4j",
+        "chromadb",
     ]:
         sys.modules.setdefault(mod, _M())
     # google.genai must also be reachable as google_mod.genai
@@ -334,6 +360,7 @@ def _make_verdict(verdict_id="v_new", claim_id="clm_001", label="refuted"):
     _ensure_memory_agent_env()
     _stub_missing_modules()
     import importlib
+
     Verdict = importlib.import_module("src.models.verdict").Verdict
     return Verdict(
         verdict_id=verdict_id,
@@ -350,13 +377,14 @@ def _get_add_verdict_fn():
     _ensure_memory_agent_env()
     _stub_missing_modules()
     import importlib
+
     return importlib.import_module("src.memory.agent").MemoryAgent.add_verdict
 
 
 def test_add_verdict_supersedes_existing():
     """add_verdict should supersede any existing active verdict for the same claim."""
     add_verdict = _get_add_verdict_fn()
-    verdict     = _make_verdict("new_verdict_id", "clm_001", "refuted")
+    verdict = _make_verdict("new_verdict_id", "clm_001", "refuted")
 
     ma = MagicMock()
     ma._vector.get_verdict_by_claim.return_value = {
@@ -375,7 +403,7 @@ def test_add_verdict_supersedes_existing():
 def test_add_verdict_no_supersede_when_no_existing():
     """add_verdict should NOT call supersede when no active verdict exists."""
     add_verdict = _get_add_verdict_fn()
-    verdict     = _make_verdict("v1", "clm_002", "supported")
+    verdict = _make_verdict("v1", "clm_002", "supported")
 
     ma = MagicMock()
     ma._vector.get_verdict_by_claim.return_value = {"ids": []}

@@ -1,4 +1,5 @@
 """LangGraph state schema for the Fact-Check Agent graph."""
+
 from typing import Optional, TypedDict
 
 from fact_check_agent.src.models.schemas import (
@@ -53,19 +54,19 @@ class FactCheckState(TypedDict):
 
 # Default values passed alongside FactCheckInput in graph.invoke()
 INITIAL_STATE: dict = {
-    "memory_results":          None,
-    "entity_context":          [],
-    "fresh_context":           [],
-    "stale_context":           [],
-    "context_claims":          [],
-    "retrieved_chunks":        [],
-    "neutral_degrees":         [],
-    "neutral_reasoning":       None,
-    "debate_transcript":       None,
-    "vlm_assessment_block":    None,
-    "source_credibility":      None,
-    "effective_topic":         "",
-    "cross_modal_flag":        False,
-    "clip_similarity_score":   None,
-    "output":                  None,
+    "memory_results": None,
+    "entity_context": [],
+    "fresh_context": [],
+    "stale_context": [],
+    "context_claims": [],
+    "retrieved_chunks": [],
+    "neutral_degrees": [],
+    "neutral_reasoning": None,
+    "debate_transcript": None,
+    "vlm_assessment_block": None,
+    "source_credibility": None,
+    "effective_topic": "",
+    "cross_modal_flag": False,
+    "clip_similarity_score": None,
+    "output": None,
 }

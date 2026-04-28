@@ -1,4 +1,5 @@
 """Tests for prompt templates — verify all placeholders are present."""
+
 import re
 
 from fact_check_agent.src.prompts import (
@@ -46,8 +47,13 @@ def test_skeptic_has_required_placeholders():
 
 
 def test_judge_has_required_placeholders():
-    required = {"claim_text", "numbered_claims", "neutral_scores_block",
-                "supporter_adjustments", "skeptic_adjustments"}
+    required = {
+        "claim_text",
+        "numbered_claims",
+        "neutral_scores_block",
+        "supporter_adjustments",
+        "skeptic_adjustments",
+    }
     assert required.issubset(placeholders(JUDGE_PROMPT))
 
 

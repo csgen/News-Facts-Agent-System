@@ -6,6 +6,7 @@ Covers:
   - query_source_credibility: Neo4j exact lookup with base_credibility fallback
   - record_verdict_outcome: all 5 write-backs delegated correctly
 """
+
 from unittest.mock import MagicMock, call, patch
 
 from fact_check_agent.src.agents.reflection_agent import (
@@ -18,6 +19,7 @@ from fact_check_agent.src.agents.reflection_agent import (
 )
 
 # ── source_id_from_url ────────────────────────────────────────────────────────
+
 
 def test_source_id_from_standard_url():
     assert source_id_from_url("https://bbc.co.uk/news/1") == "src_bbc_co_uk"
@@ -42,6 +44,7 @@ def test_source_id_same_for_same_domain():
 
 # ── credibility_signal ────────────────────────────────────────────────────────
 
+
 def test_credibility_signal_supported_high_confidence():
     assert credibility_signal("supported", 90) == 0.90
 
@@ -59,19 +62,20 @@ def test_credibility_signal_refuted_low_confidence():
 
 
 def test_credibility_signal_misleading_is_neutral():
-    assert credibility_signal("misleading", 0)   == 0.5
+    assert credibility_signal("misleading", 0) == 0.5
     assert credibility_signal("misleading", 100) == 0.5
-    assert credibility_signal("misleading", 55)  == 0.5
+    assert credibility_signal("misleading", 55) == 0.5
 
 
 def test_credibility_signal_boundary_values():
-    assert 0.0 <= credibility_signal("supported", 0)   <= 1.0
+    assert 0.0 <= credibility_signal("supported", 0) <= 1.0
     assert 0.0 <= credibility_signal("supported", 100) <= 1.0
-    assert 0.0 <= credibility_signal("refuted",   0)   <= 1.0
-    assert 0.0 <= credibility_signal("refuted",   100) <= 1.0
+    assert 0.0 <= credibility_signal("refuted", 0) <= 1.0
+    assert 0.0 <= credibility_signal("refuted", 100) <= 1.0
 
 
 # ── query_source_credibility ──────────────────────────────────────────────────
+
 
 def test_query_returns_neo4j_value():
     """When a Neo4j record exists, return it as credibility_mean."""
@@ -140,14 +144,15 @@ def test_query_failure_returns_none_stats():
 
 # ── record_verdict_outcome ────────────────────────────────────────────────────
 
+
 def _make_output(verdict="supported", confidence=80):
     output = MagicMock()
-    output.verdict_id       = "vrd_test123"
-    output.claim_id         = "clm_test456"
-    output.verdict          = verdict
+    output.verdict_id = "vrd_test123"
+    output.claim_id = "clm_test456"
+    output.verdict = verdict
     output.confidence_score = confidence
-    output.reasoning        = "Test reasoning."
-    output.evidence_links   = []
+    output.reasoning = "Test reasoning."
+    output.evidence_links = []
     output.cross_modal_flag = False
     return output
 
@@ -180,7 +185,9 @@ def test_record_alpha_update_supported():
     expected = round(old_c + _ALPHA * (0.80 - 0.5), 6)
 
     with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
-        record_verdict_outcome(_make_output("supported", 80), "claim", "https://x.com", "health", memory)
+        record_verdict_outcome(
+            _make_output("supported", 80), "claim", "https://x.com", "health", memory
+        )
 
     call_args = memory.upsert_source_topic_credibility.call_args
     assert call_args is not None
@@ -195,7 +202,9 @@ def test_record_alpha_update_uses_base_when_no_dynamic():
     memory.get_base_credibility.return_value = 0.70
 
     with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
-        record_verdict_outcome(_make_output("supported", 80), "claim", "https://x.com", "health", memory)
+        record_verdict_outcome(
+            _make_output("supported", 80), "claim", "https://x.com", "health", memory
+        )
 
     memory.upsert_source_topic_credibility.assert_called_once()
 
@@ -207,7 +216,9 @@ def test_record_alpha_update_uses_default_when_no_source():
     memory.get_base_credibility.return_value = None
 
     with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
-        record_verdict_outcome(_make_output("supported", 80), "claim", "https://unknown.xyz", "health", memory)
+        record_verdict_outcome(
+            _make_output("supported", 80), "claim", "https://unknown.xyz", "health", memory
+        )
 
     call_args = memory.upsert_source_topic_credibility.call_args
     _, _, written_c = call_args.args

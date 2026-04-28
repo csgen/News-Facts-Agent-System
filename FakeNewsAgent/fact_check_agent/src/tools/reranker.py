@@ -7,6 +7,7 @@ Two-stage pipeline:
             candidate against the query using a local sentence-transformers
             model for higher accuracy.
 """
+
 import logging
 from functools import lru_cache
 
@@ -44,6 +45,7 @@ def reciprocal_rank_fusion(
 @lru_cache(maxsize=1)
 def _load_cross_encoder(model_name: str):
     from sentence_transformers import CrossEncoder
+
     logger.info("Loading cross-encoder model: %s", model_name)
     return CrossEncoder(model_name)
 
@@ -67,17 +69,13 @@ def cross_encoder_rerank(
         model = _load_cross_encoder(model_name)
         pairs = [(query, c[text_key]) for c in candidates]
         scores = model.predict(pairs)
-        ranked = sorted(
-            zip(scores, candidates), key=lambda x: x[0], reverse=True
-        )
+        ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
         result = []
         for score, item in ranked[:top_k]:
             item = dict(item)
             item["cross_encoder_score"] = float(score)
             result.append(item)
-        logger.debug(
-            "Cross-encoder reranked %d → %d candidates", len(candidates), len(result)
-        )
+        logger.debug("Cross-encoder reranked %d → %d candidates", len(candidates), len(result))
         return result
     except Exception as e:
         logger.error("Cross-encoder reranking failed: %s — returning original order", e)
@@ -114,7 +112,9 @@ def rerank_candidates(
         merged = reciprocal_rank_fusion(lists_to_merge)
         logger.info(
             "RRF merged %d vector + %d graph → %d unique candidates",
-            len(vector_results), len(graph_results), len(merged),
+            len(vector_results),
+            len(graph_results),
+            len(merged),
         )
 
     if use_cross_encoder:

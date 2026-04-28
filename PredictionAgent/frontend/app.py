@@ -87,13 +87,14 @@ st.set_page_config(
     page_title="FactGuard | AI Fact Checker",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
 # ─────────────────────────────────────────────
 # CUSTOM CSS
 # ─────────────────────────────────────────────
-st.markdown("""
+st.markdown(
+    """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;700&display=swap');
 
@@ -185,18 +186,22 @@ html, body, [class*="css"] {
 .img-mismatch-warning { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 10px; padding: 0.8rem 1rem; color: #fca5a5; font-size: 0.85rem; }
 .img-match-ok         { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 10px; padding: 0.8rem 1rem; color: #6ee7b7; font-size: 0.85rem; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ─────────────────────────────────────────────
 # BACKEND INITIALIZATION (lazy — avoids startup crash if DBs not running)
 # ─────────────────────────────────────────────
 
+
 @st.cache_resource(show_spinner=False)
 def _init_memory():
     """Initialize MemoryAgent singleton once per Streamlit session."""
     try:
         from agents.memory_agent import get_memory
+
         return get_memory(), None
     except Exception as e:
         return None, str(e)
@@ -211,6 +216,7 @@ def _get_memory():
 # REAL BACKEND FUNCTIONS
 # ─────────────────────────────────────────────
 
+
 def _run_entity_tracker_background(claim_text_or_name: str, direct_name: str = "") -> None:
     """
     Run the Entity Tracker in a background thread after every fact-check.
@@ -218,12 +224,15 @@ def _run_entity_tracker_background(claim_text_or_name: str, direct_name: str = "
     Accepts either a claim text (extracts entities via spaCy) or a direct
     entity name string. Always includes `direct_name` if provided.
     """
+
     def _worker():
         try:
             from agents.entity_tracker import run_entity_tracker
             from agents.memory_agent import get_memory
 
-            print(f"\n[bg_tracker] thread started  claim_text_or_name={claim_text_or_name!r}  direct_name={direct_name!r}")
+            print(
+                f"\n[bg_tracker] thread started  claim_text_or_name={claim_text_or_name!r}  direct_name={direct_name!r}"
+            )
             entity_names: set[str] = set()
 
             # Include direct entity name if given (e.g. from entity search box)
@@ -238,18 +247,24 @@ def _run_entity_tracker_background(claim_text_or_name: str, direct_name: str = "
                     memory.ensure_entity_exists(clean)
                     print(f"[bg_tracker] ensure_entity_exists OK for {clean!r}")
                     linked = memory.backfill_mentions_for_entity(clean)
-                    print(f"[bg_tracker] backfill_mentions linked {linked} existing claim(s) → entity {clean!r}")
+                    print(
+                        f"[bg_tracker] backfill_mentions linked {linked} existing claim(s) → entity {clean!r}"
+                    )
                 except Exception as _ex:
                     print(f"[bg_tracker] ensure/backfill FAILED: {_ex}")
 
             # Also extract from claim text via spaCy
             try:
                 import spacy
+
                 nlp = spacy.load("en_core_web_sm")
                 doc = nlp(claim_text_or_name)
-                spacy_hits = [(e.text, e.label_) for e in doc.ents
-                              if e.label_ in {"PERSON", "ORG", "GPE", "PRODUCT", "NORP", "FAC"}
-                              and len(e.text.strip()) > 1]
+                spacy_hits = [
+                    (e.text, e.label_)
+                    for e in doc.ents
+                    if e.label_ in {"PERSON", "ORG", "GPE", "PRODUCT", "NORP", "FAC"}
+                    and len(e.text.strip()) > 1
+                ]
                 print(f"[bg_tracker] spaCy NER on claim text → {spacy_hits}")
                 for ent_text, _ in spacy_hits:
                     entity_names.add(ent_text.strip())
@@ -268,6 +283,7 @@ def _run_entity_tracker_background(claim_text_or_name: str, direct_name: str = "
             print("[bg_tracker] thread done")
         except Exception as _ex:
             import traceback
+
             print(f"[bg_tracker] UNHANDLED ERROR: {_ex}")
             traceback.print_exc()
 
@@ -304,18 +320,18 @@ def _aggregate_label(verdicts: list) -> str:
 
 def _empty_result(query: str, err_msg: str, image_url: str = "") -> dict:
     return {
-        "verdict_id":       None,
-        "label":            "misleading",
-        "confidence":       0.0,
-        "claim_text":       query[:200],
+        "verdict_id": None,
+        "label": "misleading",
+        "confidence": 0.0,
+        "claim_text": query[:200],
         "evidence_summary": err_msg,
-        "image_mismatch":   False,
-        "image_url":        image_url,
-        "vlm_caption":      "",
-        "sources":          [],
-        "charged_phrases":  [],
-        "claims":           [],
-        "is_multi":         False,
+        "image_mismatch": False,
+        "image_url": image_url,
+        "vlm_caption": "",
+        "sources": [],
+        "charged_phrases": [],
+        "claims": [],
+        "is_multi": False,
     }
 
 
@@ -339,18 +355,18 @@ def get_real_verdict(query: str) -> dict:
             if _human:
                 print(f"[human_cache] HIT — {_human.get('label')} {_human.get('confidence')}")
                 return {
-                    "verdict_id":       _human.get("verdict_id"),
-                    "label":            _human.get("label", "misleading"),
-                    "confidence":       float(_human.get("confidence", 0.5)),
-                    "claim_text":       _display_claim,
+                    "verdict_id": _human.get("verdict_id"),
+                    "label": _human.get("label", "misleading"),
+                    "confidence": float(_human.get("confidence", 0.5)),
+                    "claim_text": _display_claim,
                     "evidence_summary": "✅ This verdict was previously corrected by a human reviewer.",
-                    "image_mismatch":   bool(_human.get("image_mismatch", False)),
-                    "image_url":        "",
-                    "vlm_caption":      "",
-                    "sources":          [],
-                    "charged_phrases":  [],
-                    "claims":           [],
-                    "is_multi":         False,
+                    "image_mismatch": bool(_human.get("image_mismatch", False)),
+                    "image_url": "",
+                    "vlm_caption": "",
+                    "sources": [],
+                    "charged_phrases": [],
+                    "claims": [],
+                    "is_multi": False,
                 }
     except Exception as _hce:
         print(f"[human_cache] ERROR (falling through to pipeline): {_hce}")
@@ -378,6 +394,7 @@ def get_real_verdict(query: str) -> dict:
     # ── Fact-check each ingested claim ──────────────────────────────────
     try:
         from agents.fact_check_agent import run_fact_check_by_claim_ids
+
         with st.spinner(f"🔍 Fact-checking {len(claim_ids)} claim(s)…"):
             verdicts = run_fact_check_by_claim_ids(claim_ids)
     except Exception as e:
@@ -394,7 +411,7 @@ def get_real_verdict(query: str) -> dict:
         _mem_for_ents = _get_memory()
         if _mem_for_ents:
             for cid in claim_ids:
-                for ent in (_mem_for_ents.get_entity_context(cid) or []):
+                for ent in _mem_for_ents.get_entity_context(cid) or []:
                     name = (ent.get("name") or "").strip()
                     if name and name.lower() not in _seen:
                         _seen.add(name.lower())
@@ -408,7 +425,9 @@ def get_real_verdict(query: str) -> dict:
     sub_claims: list[dict] = []
     _mem_for_text = _get_memory()
     claim_text_by_id: dict[str, str] = {}
-    claim_image_by_id: dict[str, tuple[str, str]] = {}  # claim_id -> (image_url, preprocessing_caption)
+    claim_image_by_id: dict[
+        str, tuple[str, str]
+    ] = {}  # claim_id -> (image_url, preprocessing_caption)
     if _mem_for_text:
         try:
             r = _mem_for_text.get_claims_by_ids(claim_ids) or {}
@@ -439,24 +458,26 @@ def get_real_verdict(query: str) -> dict:
 
     for v in verdicts:
         img_url, prep_caption = claim_image_by_id.get(v.claim_id, ("", ""))
-        sub_claims.append({
-            "verdict_id":       v.verdict_id,
-            "claim_id":         v.claim_id,
-            "label":            v.verdict,
-            "confidence":       v.confidence_score / 100,
-            "claim_text":       claim_text_by_id.get(v.claim_id, ""),
-            "evidence_summary": v.reasoning,
-            "image_mismatch":   getattr(v, "cross_modal_flag", False),
-            "vlm_caption":      getattr(v, "vlm_assessment_block", "") or "",
-            "preprocessing_caption": prep_caption,
-            "image_url":        img_url,
-            "sources":          _sources_from_evidence_links(getattr(v, "evidence_links", None) or []),
-        })
+        sub_claims.append(
+            {
+                "verdict_id": v.verdict_id,
+                "claim_id": v.claim_id,
+                "label": v.verdict,
+                "confidence": v.confidence_score / 100,
+                "claim_text": claim_text_by_id.get(v.claim_id, ""),
+                "evidence_summary": v.reasoning,
+                "image_mismatch": getattr(v, "cross_modal_flag", False),
+                "vlm_caption": getattr(v, "vlm_assessment_block", "") or "",
+                "preprocessing_caption": prep_caption,
+                "image_url": img_url,
+                "sources": _sources_from_evidence_links(getattr(v, "evidence_links", None) or []),
+            }
+        )
 
     is_multi = len(sub_claims) > 1
     headline = sub_claims[0]
     agg_label = _aggregate_label(verdicts) if is_multi else headline["label"]
-    avg_conf  = (sum(sc["confidence"] for sc in sub_claims) / len(sub_claims)) if sub_claims else 0.0
+    avg_conf = (sum(sc["confidence"] for sc in sub_claims) / len(sub_claims)) if sub_claims else 0.0
 
     # Headline summary: for single-claim, use the claim's reasoning verbatim;
     # for multi-claim, prepend a short breakdown line.
@@ -474,18 +495,18 @@ def get_real_verdict(query: str) -> dict:
         headline_summary = headline["evidence_summary"]
 
     return {
-        "verdict_id":       headline["verdict_id"],
-        "label":            agg_label,
-        "confidence":       avg_conf,
-        "claim_text":       _display_claim,
+        "verdict_id": headline["verdict_id"],
+        "label": agg_label,
+        "confidence": avg_conf,
+        "claim_text": _display_claim,
         "evidence_summary": headline_summary,
-        "image_mismatch":   any(sc["image_mismatch"] for sc in sub_claims),
-        "image_url":        headline.get("image_url", ""),
-        "vlm_caption":      headline.get("preprocessing_caption", headline["vlm_caption"]),
-        "sources":          headline["sources"],
-        "charged_phrases":  [],
-        "claims":           sub_claims,
-        "is_multi":         is_multi,
+        "image_mismatch": any(sc["image_mismatch"] for sc in sub_claims),
+        "image_url": headline.get("image_url", ""),
+        "vlm_caption": headline.get("preprocessing_caption", headline["vlm_caption"]),
+        "sources": headline["sources"],
+        "charged_phrases": [],
+        "claims": sub_claims,
+        "is_multi": is_multi,
     }
 
 
@@ -528,11 +549,13 @@ def get_real_entity_history(entity_name: str) -> pd.DataFrame:
             # Neo4j returns neo4j.time.DateTime — convert to Python datetime
             if hasattr(snap_at, "to_native"):
                 snap_at = snap_at.to_native()
-            rows.append({
-                "date":             snap_at,
-                "credibility_score": snap["credibility_score"],
-                "sentiment_score":   snap["sentiment_score"],
-            })
+            rows.append(
+                {
+                    "date": snap_at,
+                    "credibility_score": snap["credibility_score"],
+                    "sentiment_score": snap["sentiment_score"],
+                }
+            )
 
         return pd.DataFrame(rows)
 
@@ -567,12 +590,14 @@ def get_real_predictions(entity_name: str) -> list:
             if hasattr(deadline, "to_native"):
                 deadline = deadline.to_native()
             deadline_str = deadline.strftime("%Y-%m-%d") if deadline else "—"
-            result.append({
-                "text":       p["prediction_text"],
-                "confidence": float(p.get("confidence") or 0.0),
-                "deadline":   deadline_str,
-                "outcome":    p.get("outcome"),
-            })
+            result.append(
+                {
+                    "text": p["prediction_text"],
+                    "confidence": float(p.get("confidence") or 0.0),
+                    "deadline": deadline_str,
+                    "outcome": p.get("outcome"),
+                }
+            )
         return result
 
     except Exception as e:
@@ -584,6 +609,7 @@ def get_real_predictions(entity_name: str) -> list:
 # HELPER FUNCTIONS — original UI helpers preserved
 # ─────────────────────────────────────────────
 
+
 def render_verdict_badge(label: str) -> str:
     icons = {"supported": "✓", "refuted": "✗", "misleading": "⚠"}
     icon = icons.get(label, "?")
@@ -594,59 +620,95 @@ def render_confidence_gauge(confidence: float, label: str):
     color_map = {"supported": "#10b981", "refuted": "#ef4444", "misleading": "#f59e0b"}
     color = color_map.get(label, "#a78bfa")
 
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=confidence * 100,
-        number={"suffix": "%", "font": {"size": 32, "color": "#e2e8f0", "family": "Space Mono"}},
-        gauge={
-            "axis": {"range": [0, 100], "tickcolor": "#475569", "tickfont": {"color": "#475569", "size": 10}},
-            "bar": {"color": color, "thickness": 0.7},
-            "bgcolor": "#1e2535",
-            "bordercolor": "#2d3748",
-            "steps": [
-                {"range": [0, 40], "color": "rgba(239,68,68,0.08)"},
-                {"range": [40, 70], "color": "rgba(245,158,11,0.08)"},
-                {"range": [70, 100], "color": "rgba(16,185,129,0.08)"},
-            ],
-            "threshold": {"line": {"color": color, "width": 2}, "thickness": 0.8, "value": confidence * 100}
-        }
-    ))
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=confidence * 100,
+            number={
+                "suffix": "%",
+                "font": {"size": 32, "color": "#e2e8f0", "family": "Space Mono"},
+            },
+            gauge={
+                "axis": {
+                    "range": [0, 100],
+                    "tickcolor": "#475569",
+                    "tickfont": {"color": "#475569", "size": 10},
+                },
+                "bar": {"color": color, "thickness": 0.7},
+                "bgcolor": "#1e2535",
+                "bordercolor": "#2d3748",
+                "steps": [
+                    {"range": [0, 40], "color": "rgba(239,68,68,0.08)"},
+                    {"range": [40, 70], "color": "rgba(245,158,11,0.08)"},
+                    {"range": [70, 100], "color": "rgba(16,185,129,0.08)"},
+                ],
+                "threshold": {
+                    "line": {"color": color, "width": 2},
+                    "thickness": 0.8,
+                    "value": confidence * 100,
+                },
+            },
+        )
+    )
     fig.update_layout(
-        height=200, margin=dict(l=20, r=20, t=20, b=10),
-        paper_bgcolor="rgba(0,0,0,0)", font={"color": "#e2e8f0"}
+        height=200,
+        margin=dict(l=20, r=20, t=20, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#e2e8f0"},
     )
     return fig
 
 
 def render_credibility_chart(df: pd.DataFrame, entity_name: str):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["date"], y=df["credibility_score"],
-        mode="lines+markers", name="Credibility",
-        line=dict(color="#a78bfa", width=2.5, shape="spline"),
-        marker=dict(size=4, color="#a78bfa"),
-        fill="tozeroy", fillcolor="rgba(167,139,250,0.06)"
-    ))
-    fig.add_trace(go.Scatter(
-        x=df["date"], y=df["sentiment_score"],
-        mode="lines", name="Sentiment",
-        line=dict(color="#38bdf8", width=1.5, dash="dot", shape="spline"),
-        yaxis="y2"
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["credibility_score"],
+            mode="lines+markers",
+            name="Credibility",
+            line=dict(color="#a78bfa", width=2.5, shape="spline"),
+            marker=dict(size=4, color="#a78bfa"),
+            fill="tozeroy",
+            fillcolor="rgba(167,139,250,0.06)",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["sentiment_score"],
+            mode="lines",
+            name="Sentiment",
+            line=dict(color="#38bdf8", width=1.5, dash="dot", shape="spline"),
+            yaxis="y2",
+        )
+    )
     fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#94a3b8", family="DM Sans"),
         title=dict(text=f"Credibility Drift — {entity_name}", font=dict(color="#e2e8f0", size=14)),
         xaxis=dict(gridcolor="#1e2535", showgrid=True, zeroline=False),
-        yaxis=dict(gridcolor="#1e2535", showgrid=True, zeroline=False,
-                   range=[0, 1], title=dict(text="Credibility", font=dict(color="#a78bfa"))),
-        yaxis2=dict(overlaying="y", side="right", range=[-1, 1],
-                    title=dict(text="Sentiment", font=dict(color="#38bdf8")), showgrid=False),
+        yaxis=dict(
+            gridcolor="#1e2535",
+            showgrid=True,
+            zeroline=False,
+            range=[0, 1],
+            title=dict(text="Credibility", font=dict(color="#a78bfa")),
+        ),
+        yaxis2=dict(
+            overlaying="y",
+            side="right",
+            range=[-1, 1],
+            title=dict(text="Sentiment", font=dict(color="#38bdf8")),
+            showgrid=False,
+        ),
         legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="#2d3748"),
-        height=300, margin=dict(l=10, r=10, t=50, b=10), hovermode="x unified"
+        height=300,
+        margin=dict(l=10, r=10, t=50, b=10),
+        hovermode="x unified",
     )
     return fig
-
 
 
 # ─────────────────────────────────────────────
@@ -654,7 +716,8 @@ def render_credibility_chart(df: pd.DataFrame, entity_name: str):
 # ─────────────────────────────────────────────
 
 # ── Centered hero header ──────────────────────
-st.markdown("""
+st.markdown(
+    """
 <div style="text-align:center; margin-bottom:0.5rem; padding-top:0.5rem;">
   <div style="font-size:3rem; margin-bottom:0.3rem; line-height:1;">🛡️</div>
   <div style="font-family:'Space Mono',monospace; font-size:2.6rem; font-weight:700;
@@ -671,12 +734,15 @@ st.markdown("""
                 color:#94a3b8; padding:0.15rem 1rem;">Ahmed Abdul Wasae</div>
   </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # ── Architecture Diagram ──────────────────────
 import streamlit.components.v1 as _components
 
-_components.html("""<!DOCTYPE html>
+_components.html(
+    """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -788,7 +854,10 @@ _components.html("""<!DOCTYPE html>
 
   </div>
 </body>
-</html>""", height=148, scrolling=False)
+</html>""",
+    height=148,
+    scrolling=False,
+)
 
 st.divider()
 
@@ -799,7 +868,7 @@ with col_input:
         "Paste a news claim, article URL, or text snippet",
         placeholder="e.g. '500,000 Tesla vehicles were recalled due to brake defects' or paste a full article URL...",
         height=100,
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
 with col_btn:
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
@@ -843,13 +912,17 @@ if run_btn and user_input.strip():
     # ── Layer A + B Input Guardrail — runs BEFORE the pipeline ───────────
     try:
         from agents.input_guardrail import check_input
+
         _guard = check_input(user_input)
         if _guard["blocked"]:
             # SecOps: log blocked input (hashed for privacy)
             _input_hash = hashlib.sha256(user_input.encode()).hexdigest()[:16]
             _guardrail_log.warning(
                 "BLOCKED | hash=%s | layer=%s | risk=%s | reason=%s",
-                _input_hash, _guard["layer"], _guard["risk"], _guard["reason"],
+                _input_hash,
+                _guard["layer"],
+                _guard["risk"],
+                _guard["reason"],
             )
             st.error(
                 f"⚠️ **Input blocked** [{_guard['risk']} risk]\n\n"
@@ -870,28 +943,27 @@ if run_btn and user_input.strip():
     _valid, _err = _validate_verdict(result)
     if not _valid:
         logging.warning("[schema] Invalid verdict returned: %s — %s", result, _err)
-        result["label"]      = "misleading"
+        result["label"] = "misleading"
         result["confidence"] = 0.0
-        result["evidence_summary"] = (
-            f"[Schema validation failed: {_err}] "
-            + result.get("evidence_summary", "")
+        result["evidence_summary"] = f"[Schema validation failed: {_err}] " + result.get(
+            "evidence_summary", ""
         )
 
     # ── Persist result so widget interactions (slider, radio) don't wipe it ──
-    st.session_state["_last_result"]       = result
-    st.session_state["_last_user_input"]   = user_input
-    st.session_state["_last_claim_text"]   = result.get("claim_text", user_input)
+    st.session_state["_last_result"] = result
+    st.session_state["_last_user_input"] = user_input
+    st.session_state["_last_claim_text"] = result.get("claim_text", user_input)
 
 # ── Restore result on reruns caused by widget interactions ───────────────────
 if not run_btn and "last_result" not in st.session_state:
     # first load, nothing to show
     pass
 
-_cached_result     = st.session_state.get("_last_result")
+_cached_result = st.session_state.get("_last_result")
 _cached_user_input = st.session_state.get("_last_user_input", "")
 
 if _cached_result and (run_btn or not run_btn):
-    result     = _cached_result
+    result = _cached_result
     user_input = _cached_user_input if not run_btn else user_input
 
     # ── Auto-fill entity box + run tracker ──────────────────────────────
@@ -920,11 +992,15 @@ if _cached_result and (run_btn or not run_btn):
             if _claim_text_for_ner:
                 try:
                     import spacy as _spacy
+
                     _nlp = _spacy.load("en_core_web_sm")
                     _doc = _nlp(_claim_text_for_ner)
                     _valid_labels = {"PERSON", "ORG", "GPE", "PRODUCT", "NORP", "FAC"}
-                    _found = [e.text.strip() for e in _doc.ents
-                              if e.label_ in _valid_labels and len(e.text.strip()) > 1]
+                    _found = [
+                        e.text.strip()
+                        for e in _doc.ents
+                        if e.label_ in _valid_labels and len(e.text.strip()) > 1
+                    ]
                     if _found:
                         _auto_entity = _found[0]
                 except Exception:
@@ -933,9 +1009,11 @@ if _cached_result and (run_btn or not run_btn):
         if not _auto_entity and user_input.strip().startswith("http"):
             try:
                 from urllib.parse import urlparse
+
                 _path = urlparse(user_input).path
-                _words = [w for w in _path.replace("/", "-").split("-")
-                          if len(w) > 3 and w.isalpha()]
+                _words = [
+                    w for w in _path.replace("/", "-").split("-") if len(w) > 3 and w.isalpha()
+                ]
                 if _words:
                     _auto_entity = _words[0].capitalize()
             except Exception:
@@ -951,10 +1029,10 @@ if _cached_result and (run_btn or not run_btn):
 
     # ── Show tracked entities banner (typed + auto-detected) ────────────
     if run_btn:
-        _typed      = st.session_state.get("_auto_entity", "").strip()
-        _auto_ents  = st.session_state.get("_auto_detected_entities", [])
+        _typed = st.session_state.get("_auto_entity", "").strip()
+        _auto_ents = st.session_state.get("_auto_detected_entities", [])
         # Merge: typed entity first, then auto-detected (deduplicated, case-insensitive)
-        _seen       = set()
+        _seen = set()
         _all_tracked = []
         for _n in ([_typed] if _typed else []) + _auto_ents:
             if _n and _n.lower() not in _seen:
@@ -964,24 +1042,21 @@ if _cached_result and (run_btn or not run_btn):
         if _all_tracked:
             _pills = "".join(
                 f'<span style="display:inline-block; background:#1e2535; border:1px solid #2d3748; '
-                f'border-radius:999px; padding:2px 10px; font-size:0.75rem; color:#a78bfa; '
-                f'margin:2px 4px 2px 0; font-family:\'Space Mono\',monospace;">'
-                f'📊 {n}</span>'
+                f"border-radius:999px; padding:2px 10px; font-size:0.75rem; color:#a78bfa; "
+                f"margin:2px 4px 2px 0; font-family:'Space Mono',monospace;\">"
+                f"📊 {n}</span>"
                 for n in _all_tracked
             )
             st.markdown(
                 f'<div style="margin-bottom:0.6rem; font-size:0.78rem; color:#64748b;">'
-                f'Entity tracker running for: {_pills}'
+                f"Entity tracker running for: {_pills}"
                 f'<span style="color:#475569; margin-left:6px;">— switch to '
                 f'<strong style="color:#94a3b8;">Entity &amp; Trend</strong> tab in ~5s</span></div>',
                 unsafe_allow_html=True,
             )
 
     # ── 2 TABS ──
-    tab1, tab2 = st.tabs([
-        "📋  Fact Verdict",
-        "📈  Entity & Trend"
-    ])
+    tab1, tab2 = st.tabs(["📋  Fact Verdict", "📈  Entity & Trend"])
 
     # ─────────────────────
     # TAB 1: FACT VERDICT
@@ -997,20 +1072,26 @@ if _cached_result and (run_btn or not run_btn):
 
         with left:
             label = result["label"]
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div class="verdict-card verdict-{label}">
                 <div style="margin-bottom:0.8rem">{render_verdict_badge(label)}</div>
                 <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:0.8rem; font-style:italic;">
-                    "{result['claim_text']}"
+                    "{result["claim_text"]}"
                 </div>
                 <div style="font-size:0.9rem; color:#cbd5e1; line-height:1.7;">
-                    {result['evidence_summary']}
+                    {result["evidence_summary"]}
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
             # Verified sources
-            st.markdown('<div class="section-header" style="margin-top:1rem">Verified Sources</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="section-header" style="margin-top:1rem">Verified Sources</div>',
+                unsafe_allow_html=True,
+            )
             if result["sources"]:
                 source_html = ""
                 for src in result["sources"]:
@@ -1018,65 +1099,95 @@ if _cached_result and (run_btn or not run_btn):
                     source_html += f'<span class="source-pill">🔗 {src["name"]} <span style="color:{cred_color}; font-weight:600;">{src["credibility"]:.0%}</span></span>'
                 st.markdown(source_html, unsafe_allow_html=True)
             else:
-                st.markdown('<span style="color:#475569; font-size:0.85rem;">No external sources retrieved.</span>', unsafe_allow_html=True)
+                st.markdown(
+                    '<span style="color:#475569; font-size:0.85rem;">No external sources retrieved.</span>',
+                    unsafe_allow_html=True,
+                )
 
         with right:
-            st.markdown('<div class="section-header">Confidence Score</div>', unsafe_allow_html=True)
-            st.plotly_chart(render_confidence_gauge(result["confidence"], label),
-                            use_container_width=True, config={"displayModeBar": False})
+            st.markdown(
+                '<div class="section-header">Confidence Score</div>', unsafe_allow_html=True
+            )
+            st.plotly_chart(
+                render_confidence_gauge(result["confidence"], label),
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
 
-            st.markdown('<div class="section-header" style="margin-top:0.5rem">Image Assessment</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="section-header" style="margin-top:0.5rem">Image Assessment</div>',
+                unsafe_allow_html=True,
+            )
             _vlm_block = (result.get("vlm_caption") or "").strip()
-            _image_url   = (result.get("image_url") or "").strip()
+            _image_url = (result.get("image_url") or "").strip()
 
             if result["image_mismatch"]:
-                _vlm_html = _vlm_block.replace(chr(10), '<br>') if _vlm_block else "The article image does not match the described event context."
-                st.markdown(f"""
+                _vlm_html = (
+                    _vlm_block.replace(chr(10), "<br>")
+                    if _vlm_block
+                    else "The article image does not match the described event context."
+                )
+                st.markdown(
+                    f"""
                 <div class="img-mismatch-warning">
                     ⚠️ <strong>Image Mismatch Detected</strong><br>
                     <span style="font-size:0.82rem;">{_vlm_html}</span>
                 </div>
-                """, unsafe_allow_html=True)
+                """,
+                    unsafe_allow_html=True,
+                )
             elif _image_url:
                 if _vlm_block:
-                    _vlm_html = _vlm_block.replace(chr(10), '<br>')
-                    st.markdown(f"""
+                    _vlm_html = _vlm_block.replace(chr(10), "<br>")
+                    st.markdown(
+                        f"""
                     <div class="img-match-ok">
                         ✓ <strong>Image Assessment</strong><br>
                         <span style="font-size:0.82rem; color:#94a3b8; font-style:italic;">
                             {_vlm_html}
                         </span>
                     </div>
-                    """, unsafe_allow_html=True)
+                    """,
+                        unsafe_allow_html=True,
+                    )
                 else:
-                    st.markdown("""
+                    st.markdown(
+                        """
                     <div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.25);
                                 border-radius:10px; padding:0.8rem 1rem; font-size:0.82rem; color:#94a3b8;">
                         🖼️ <strong style="color:#38bdf8;">Article image found</strong><br>
                         Vision assessment is disabled or not available.
                     </div>
-                    """, unsafe_allow_html=True)
+                    """,
+                        unsafe_allow_html=True,
+                    )
                 st.image(_image_url, use_container_width=True)
             else:
-                st.markdown("""
+                st.markdown(
+                    """
                 <div style="background:rgba(71,85,105,0.15); border:1px solid rgba(71,85,105,0.3);
                             border-radius:10px; padding:0.8rem 1rem; font-size:0.82rem; color:#64748b;">
                     🖼️ <strong style="color:#94a3b8;">No image detected</strong><br>
                     No image was found in this article — image assessment was skipped.
                 </div>
-                """, unsafe_allow_html=True)
+                """,
+                    unsafe_allow_html=True,
+                )
 
         # ── Per-claim breakdown (only when the input decomposed into >1 claim) ──
         _sub_claims = result.get("claims") or []
         if result.get("is_multi") and len(_sub_claims) > 1:
             st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
-            with st.expander(f"📋  Per-claim breakdown — {len(_sub_claims)} claims", expanded=False):
+            with st.expander(
+                f"📋  Per-claim breakdown — {len(_sub_claims)} claims", expanded=False
+            ):
                 for _i, _sc in enumerate(_sub_claims, start=1):
                     _sc_label = _sc.get("label", "misleading")
-                    _sc_text  = (_sc.get("claim_text") or "").strip()
+                    _sc_text = (_sc.get("claim_text") or "").strip()
                     _sc_reason = (_sc.get("evidence_summary") or "").strip()
-                    _sc_conf   = _sc.get("confidence", 0.0)
-                    st.markdown(f"""
+                    _sc_conf = _sc.get("confidence", 0.0)
+                    st.markdown(
+                        f"""
                     <div class="verdict-card verdict-{_sc_label}" style="margin-top:0.6rem;">
                         <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.5rem;">
                             <span style="font-family:'Space Mono',monospace; font-size:0.7rem;
@@ -1093,14 +1204,17 @@ if _cached_result and (run_btn or not run_btn):
                             {_sc_reason}
                         </div>
                     </div>
-                    """, unsafe_allow_html=True)
+                    """,
+                        unsafe_allow_html=True,
+                    )
 
         # ── Human Feedback form (only shown when confidence is low) ──────
         _confidence = result["confidence"]
         _verdict_id = result.get("verdict_id")
         if _confidence < 0.75 and _verdict_id:
             st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
-            st.markdown("""
+            st.markdown(
+                """
             <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25);
                         border-radius:12px; padding:1rem 1.2rem; margin-top:0.5rem;">
                 <div style="font-family:'Space Mono',monospace; font-size:0.65rem;
@@ -1111,7 +1225,9 @@ if _cached_result and (run_btn or not run_btn):
                     submit it below to improve the system.
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
             with st.expander("✏️  Correct this verdict", expanded=True):
                 fb_col1, fb_col2 = st.columns([2, 3])
@@ -1120,18 +1236,24 @@ if _cached_result and (run_btn or not run_btn):
                         "Correct verdict",
                         ["supported", "misleading", "refuted"],
                         index=["supported", "misleading", "refuted"].index(result["label"])
-                        if result["label"] in ["supported", "misleading", "refuted"] else 1,
-                        key="fb_label"
+                        if result["label"] in ["supported", "misleading", "refuted"]
+                        else 1,
+                        key="fb_label",
                     )
                     fb_conf = st.slider(
-                        "Correct confidence", 0, 100,
-                        value=int(_confidence * 100), step=5, key="fb_conf"
+                        "Correct confidence",
+                        0,
+                        100,
+                        value=int(_confidence * 100),
+                        step=5,
+                        key="fb_conf",
                     )
                 with fb_col2:
                     fb_note = st.text_area(
                         "Reason / evidence (optional)",
                         placeholder="e.g. 'Reuters reported this as confirmed on 2024-03-15'",
-                        height=100, key="fb_note"
+                        height=100,
+                        key="fb_note",
                     )
 
                 if st.button("✅  Submit Correction", key="fb_submit"):
@@ -1139,8 +1261,8 @@ if _cached_result and (run_btn or not run_btn):
                         mem = _get_memory()
                         if mem:
                             _correct_conf = fb_conf / 100
-                            _old_label    = result.get("label", "unknown")
-                            _old_conf     = result.get("confidence", 0.0)
+                            _old_label = result.get("label", "unknown")
+                            _old_conf = result.get("confidence", 0.0)
 
                             # 1. Patch the verdict in Neo4j + ChromaDB
                             mem.update_verdict_with_feedback(
@@ -1154,8 +1276,11 @@ if _cached_result and (run_btn or not run_btn):
                             _hitl_log.info(
                                 "CORRECTION | verdict_id=%s | old_label=%s | new_label=%s "
                                 "| old_conf=%.2f | new_conf=%.2f | note=%s",
-                                _verdict_id, _old_label, fb_label,
-                                _old_conf, _correct_conf,
+                                _verdict_id,
+                                _old_label,
+                                fb_label,
+                                _old_conf,
+                                _correct_conf,
                                 fb_note.replace("\n", " ") if fb_note else "",
                             )
 
@@ -1165,26 +1290,31 @@ if _cached_result and (run_btn or not run_btn):
                                 from fact_check_agent.src.agents.reflection_agent import (
                                     record_hitl_correction,
                                 )
-                                _sources    = result.get("sources", [])
+
+                                _sources = result.get("sources", [])
                                 _source_url = _sources[0]["url"] if _sources else ""
                                 record_hitl_correction(
-                                    verdict_id    = _verdict_id,
-                                    fb_label      = fb_label,
-                                    fb_confidence = _correct_conf,
-                                    source_url    = _source_url,
-                                    memory        = mem,
+                                    verdict_id=_verdict_id,
+                                    fb_label=fb_label,
+                                    fb_confidence=_correct_conf,
+                                    source_url=_source_url,
+                                    memory=mem,
                                 )
-                                print(f"[hitl] credibility updated → {_source_url}  cred={_correct_conf:.2f}  label={fb_label}")
+                                print(
+                                    f"[hitl] credibility updated → {_source_url}  cred={_correct_conf:.2f}  label={fb_label}"
+                                )
                             except Exception as _sce:
                                 print(f"[hitl] credibility update skipped: {_sce}")
 
                             # 3. Update cached result so verdict card reflects correction immediately
                             if "_last_result" in st.session_state:
                                 _updated = dict(st.session_state["_last_result"])
-                                _updated["label"]      = fb_label
+                                _updated["label"] = fb_label
                                 _updated["confidence"] = _correct_conf
                                 st.session_state["_last_result"] = _updated
-                            st.session_state["_feedback_toast"] = f"✅ Verdict updated to **{fb_label.upper()}** ({fb_conf}% confidence)"
+                            st.session_state["_feedback_toast"] = (
+                                f"✅ Verdict updated to **{fb_label.upper()}** ({fb_conf}% confidence)"
+                            )
                             st.rerun()
                         else:
                             st.warning("Memory not available — correction not saved.")
@@ -1202,15 +1332,19 @@ if _cached_result and (run_btn or not run_btn):
             or (st.session_state.get("_auto_entity", "").strip() if not _typed_in_box else "")
             or "Tesla"
         )
-        st.markdown(f'<div class="section-header">Entity Profile — {entity_name}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="section-header">Entity Profile — {entity_name}</div>',
+            unsafe_allow_html=True,
+        )
 
         df = get_real_entity_history(entity_name)
 
         if df.empty:
-            _snap_count   = df.attrs.get("snapshot_count", 0)
+            _snap_count = df.attrs.get("snapshot_count", 0)
             _entity_found = df.attrs.get("entity_found", False)
             if not _entity_found:
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 <div style="background:rgba(71,85,105,0.15); border:1px solid #2d3748;
                             border-radius:12px; padding:1.2rem 1.4rem;">
                     <div style="font-family:'Space Mono',monospace; font-size:0.7rem;
@@ -1225,9 +1359,12 @@ if _cached_result and (run_btn or not run_btn):
                         automatically build their credibility profile.
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                """,
+                    unsafe_allow_html=True,
+                )
             else:
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 <div style="background:rgba(71,85,105,0.15); border:1px solid #2d3748;
                             border-radius:12px; padding:1.2rem 1.4rem;">
                     <div style="font-family:'Space Mono',monospace; font-size:0.7rem;
@@ -1241,7 +1378,7 @@ if _cached_result and (run_btn or not run_btn):
                     </div>
                     <div style="background:#1e2535; border-radius:6px; height:6px; width:100%; margin-bottom:0.8rem;">
                         <div style="background:#a78bfa; border-radius:6px; height:6px;
-                                    width:{min(100, int(_snap_count/3*100))}%;"></div>
+                                    width:{min(100, int(_snap_count / 3 * 100))}%;"></div>
                     </div>
                     <div style="font-size:0.82rem; color:#64748b;">
                         Each time you fact-check a claim mentioning
@@ -1250,69 +1387,96 @@ if _cached_result and (run_btn or not run_btn):
                         Check <strong>{max(0, 3 - _snap_count)}</strong> more claim(s) to unlock the trend chart.
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                """,
+                    unsafe_allow_html=True,
+                )
         else:
             m1, m2, m3, m4 = st.columns(4)
             current_cred = df["credibility_score"].iloc[-1]
-            cred_change  = df["credibility_score"].iloc[-1] - df["credibility_score"].iloc[0]
-            avg_sent     = df["sentiment_score"].mean()
+            cred_change = df["credibility_score"].iloc[-1] - df["credibility_score"].iloc[0]
+            avg_sent = df["sentiment_score"].mean()
 
             with m1:
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 <div class="metric-box">
-                    <div class="metric-value" style="color:{'#10b981' if current_cred > 0.6 else '#ef4444'};">
+                    <div class="metric-value" style="color:{"#10b981" if current_cred > 0.6 else "#ef4444"};">
                         {current_cred:.0%}
                     </div>
                     <div class="metric-label">Current Credibility</div>
-                </div>""", unsafe_allow_html=True)
+                </div>""",
+                    unsafe_allow_html=True,
+                )
             with m2:
                 arrow = "↓" if cred_change < 0 else "↑"
                 col = "#ef4444" if cred_change < 0 else "#10b981"
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 <div class="metric-box">
                     <div class="metric-value" style="color:{col};">{arrow} {abs(cred_change):.0%}</div>
                     <div class="metric-label">Drift ({len(df)}-snapshot span)</div>
-                </div>""", unsafe_allow_html=True)
+                </div>""",
+                    unsafe_allow_html=True,
+                )
             with m3:
-                sent_label = "Positive" if avg_sent > 0.2 else ("Negative" if avg_sent < -0.1 else "Neutral")
-                st.markdown(f"""
+                sent_label = (
+                    "Positive" if avg_sent > 0.2 else ("Negative" if avg_sent < -0.1 else "Neutral")
+                )
+                st.markdown(
+                    f"""
                 <div class="metric-box">
                     <div class="metric-value" style="font-size:1.4rem;">{sent_label}</div>
                     <div class="metric-label">Avg Sentiment</div>
-                </div>""", unsafe_allow_html=True)
+                </div>""",
+                    unsafe_allow_html=True,
+                )
             with m4:
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 <div class="metric-box">
                     <div class="metric-value">{len(df)}</div>
                     <div class="metric-label">Snapshots Tracked</div>
-                </div>""", unsafe_allow_html=True)
+                </div>""",
+                    unsafe_allow_html=True,
+                )
 
             st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
-            st.plotly_chart(render_credibility_chart(df, entity_name),
-                            use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(
+                render_credibility_chart(df, entity_name),
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
 
         # Predictions
-        st.markdown('<div class="section-header" style="margin-top:0.5rem">AI Predictions</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-header" style="margin-top:0.5rem">AI Predictions</div>',
+            unsafe_allow_html=True,
+        )
         predictions = get_real_predictions(entity_name)
 
         if not predictions:
-            st.info(f"No predictions yet for '{entity_name}'. They generate automatically after credibility history builds up.")
+            st.info(
+                f"No predictions yet for '{entity_name}'. They generate automatically after credibility history builds up."
+            )
         else:
             for pred in predictions:
                 conf_color = "#10b981" if pred["confidence"] > 0.7 else "#f59e0b"
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 <div class="verdict-card" style="margin-bottom:0.7rem;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
                         <span style="font-size:0.75rem; color:#64748b; font-family:'Space Mono',monospace;">
-                            📅 Deadline: {pred['deadline']}
+                            📅 Deadline: {pred["deadline"]}
                         </span>
                         <span style="font-size:0.75rem; font-weight:700; color:{conf_color}; font-family:'Space Mono',monospace;">
-                            {pred['confidence']:.0%} confidence
+                            {pred["confidence"]:.0%} confidence
                         </span>
                     </div>
-                    <div style="color:#cbd5e1; font-size:0.9rem;">{pred['text']}</div>
+                    <div style="color:#cbd5e1; font-size:0.9rem;">{pred["text"]}</div>
                 </div>
-                """, unsafe_allow_html=True)
+                """,
+                    unsafe_allow_html=True,
+                )
 
 elif run_btn and not user_input.strip() and not _cached_result:
     st.warning("Please enter a news claim or article URL to verify.")
@@ -1321,7 +1485,8 @@ elif run_btn and not user_input.strip() and not _cached_result:
 # EMPTY STATE (no query yet)
 # ─────────────────────────────────────────────
 if not run_btn and not _cached_result:
-    st.markdown("""
+    st.markdown(
+        """
     <div style="text-align:center; padding:4rem 0; color:#334155;">
         <div style="font-size:4rem; margin-bottom:1rem;">🛡️</div>
         <div style="font-family:'Space Mono',monospace; font-size:1rem; color:#475569;">
@@ -1331,4 +1496,6 @@ if not run_btn and not _cached_result:
             Powered by 6 specialized AI agents · Real-time web search · Knowledge Graph memory
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )

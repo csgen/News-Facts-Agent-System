@@ -4,6 +4,7 @@ Each node is a pure function: (state) -> dict of partial state updates.
 Nodes that need MemoryAgent receive it as a second argument via closure
 (see graph.py build_graph()).
 """
+
 import json
 import logging
 from typing import TYPE_CHECKING, Optional
@@ -40,28 +41,37 @@ logger = logging.getLogger(__name__)
 
 # ── Node: receive_claim ───────────────────────────────────────────────────────
 
+
 def receive_claim(state: FactCheckState) -> dict:
     """Initialise all mutable state fields to defaults."""
     inp = state["input"]
     return {
-        "memory_results":          None,
-        "entity_context":          [],
-        "fresh_context":           [],
-        "stale_context":           [],
-        "context_claims":          [],
-        "retrieved_chunks":        list(inp.prefetched_chunks),
-        "debate_transcript":       None,
-        "vlm_assessment_block":    None,
-        "source_credibility":      None,
-        "cross_modal_flag":        False,
-        "clip_similarity_score":   None,
-        "output":                  None,
+        "memory_results": None,
+        "entity_context": [],
+        "fresh_context": [],
+        "stale_context": [],
+        "context_claims": [],
+        "retrieved_chunks": list(inp.prefetched_chunks),
+        "debate_transcript": None,
+        "vlm_assessment_block": None,
+        "source_credibility": None,
+        "cross_modal_flag": False,
+        "clip_similarity_score": None,
+        "output": None,
     }
 
 
 _TOPIC_LIST = (
-    "technology", "geopolitics", "financial", "health", "science",
-    "sports", "entertainment", "climate", "crime", "art",
+    "technology",
+    "geopolitics",
+    "financial",
+    "health",
+    "science",
+    "sports",
+    "entertainment",
+    "climate",
+    "crime",
+    "art",
 )
 
 
@@ -75,15 +85,17 @@ def _classify_topic(claim_text: str, settings) -> str:
         client = _llm_factory.make_llm_client()
         response = client.chat.completions.create(
             model=_llm_factory.llm_model_name(),
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Classify this claim into exactly one topic. "
-                    f"Options: {' | '.join(_TOPIC_LIST)}\n\n"
-                    f"Claim: {claim_text}\n\n"
-                    "Respond with just the single topic word."
-                ),
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Classify this claim into exactly one topic. "
+                        f"Options: {' | '.join(_TOPIC_LIST)}\n\n"
+                        f"Claim: {claim_text}\n\n"
+                        "Respond with just the single topic word."
+                    ),
+                }
+            ],
             temperature=0,
             max_tokens=10,
         )
@@ -96,17 +108,19 @@ def _classify_topic(claim_text: str, settings) -> str:
 
 # ── Node: query_memory ────────────────────────────────────────────────────────
 
+
 def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) -> dict:
     """Query MemoryAgent: similar claims (vector) + optional GraphRAG + reranking."""
     from fact_check_agent.src.config import settings as _settings
+
     if settings is None:
         settings = _settings
 
     if settings.offline_mode:
         logger.info("query_memory: offline_mode=True — skipping all DB reads")
         return {
-            "memory_results":  MemoryQueryResponse(results=[], max_confidence=0.0),
-            "entity_context":  [],
+            "memory_results": MemoryQueryResponse(results=[], max_confidence=0.0),
+            "entity_context": [],
             "source_credibility": {},
         }
 
@@ -114,35 +128,37 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
 
     # ── Stage 1: vector similarity search ────────────────────────────────
     vector_results = retrieve_similar_claims(inp.claim_text, memory)
-    entity_ctx     = memory.get_entity_context(inp.claim_id)
+    entity_ctx = memory.get_entity_context(inp.claim_id)
 
     # ── Stage 2: GraphRAG — expand via entity-claim traversal ────────────
     graph_results: list[dict] = []
     if settings.use_graph_rag and vector_results:
-        claim_ids  = [c["claim_id"] for c in vector_results]
+        claim_ids = [c["claim_id"] for c in vector_results]
         entity_ids = [e["entity_id"] for e in memory.get_entity_ids_for_claims(claim_ids)]
         if entity_ids:
             graph_results = memory.get_graph_claims_for_entities(entity_ids)
-            logger.info("GraphRAG: %d entities → %d graph claims", len(entity_ids), len(graph_results))
+            logger.info(
+                "GraphRAG: %d entities → %d graph claims", len(entity_ids), len(graph_results)
+            )
 
     # ── Stage 3: RRF merge + optional cross-encoder rerank ───────────────
     reranked = rerank_candidates(
-        query              = inp.claim_text,
-        vector_results     = vector_results,
-        graph_results      = graph_results,
-        use_cross_encoder  = settings.use_cross_encoder,
-        cross_encoder_model= settings.cross_encoder_model,
-        top_k              = settings.reranker_top_k,
+        query=inp.claim_text,
+        vector_results=vector_results,
+        graph_results=graph_results,
+        use_cross_encoder=settings.use_cross_encoder,
+        cross_encoder_model=settings.cross_encoder_model,
+        top_k=settings.reranker_top_k,
     )
 
     results = [
         SimilarClaim(
-            claim_id           = c["claim_id"],
-            claim_text         = c["claim_text"],
-            verdict_label      = c.get("verdict_label"),
-            verdict_confidence = c.get("verdict_confidence"),
-            distance           = c.get("distance", 0.0),
-            verified_at        = c.get("verified_at"),
+            claim_id=c["claim_id"],
+            claim_text=c["claim_text"],
+            verdict_label=c.get("verdict_label"),
+            verdict_confidence=c.get("verdict_confidence"),
+            distance=c.get("distance", 0.0),
+            verified_at=c.get("verified_at"),
         )
         for c in reranked
     ]
@@ -158,29 +174,35 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
         effective_topic = _classify_topic(inp.claim_text, settings)
 
     source_cred = query_source_credibility(
-        claim_text = inp.claim_text,
-        source_url = inp.source_url,
-        memory     = memory,
-        topic      = effective_topic,
+        claim_text=inp.claim_text,
+        source_url=inp.source_url,
+        memory=memory,
+        topic=effective_topic,
     )
 
     logger.info(
         "query_memory: %d vector + %d graph → %d reranked, max_confidence=%.2f, "
         "graph_rag=%s, cross_encoder=%s, topic=%s, source_cred_samples=%d",
-        len(vector_results), len(graph_results), len(results), max_confidence,
-        settings.use_graph_rag, settings.use_cross_encoder,
-        effective_topic, source_cred.get("sample_count", 0),
+        len(vector_results),
+        len(graph_results),
+        len(results),
+        max_confidence,
+        settings.use_graph_rag,
+        settings.use_cross_encoder,
+        effective_topic,
+        source_cred.get("sample_count", 0),
     )
 
     return {
-        "memory_results":     MemoryQueryResponse(results=results, max_confidence=max_confidence),
-        "entity_context":     entity_ctx,
+        "memory_results": MemoryQueryResponse(results=results, max_confidence=max_confidence),
+        "entity_context": entity_ctx,
         "source_credibility": source_cred,
-        "effective_topic":    effective_topic,
+        "effective_topic": effective_topic,
     }
 
 
 # ── Node: freshness_check_all ─────────────────────────────────────────────────
+
 
 def freshness_check_all(state: FactCheckState, settings) -> dict:
     """Tag every retrieved SimilarClaim as fresh or stale using check_freshness().
@@ -206,14 +228,14 @@ def freshness_check_all(state: FactCheckState, settings) -> dict:
             continue
 
         freshness = check_freshness(
-            claim_text         = claim.claim_text,
-            verdict_label      = claim.verdict_label,
-            verdict_confidence = claim.verdict_confidence or 0.5,
-            last_verified_at   = claim.verified_at,
-            api_key            = settings.openai_api_key,
-            model              = _llm_factory.llm_model_name(),
+            claim_text=claim.claim_text,
+            verdict_label=claim.verdict_label,
+            verdict_confidence=claim.verdict_confidence or 0.5,
+            last_verified_at=claim.verified_at,
+            api_key=settings.openai_api_key,
+            model=_llm_factory.llm_model_name(),
         )
-        chunk["freshness_reason"]   = freshness["reason"]
+        chunk["freshness_reason"] = freshness["reason"]
         chunk["freshness_category"] = freshness["claim_category"]
 
         if freshness["revalidate"]:
@@ -227,7 +249,7 @@ def freshness_check_all(state: FactCheckState, settings) -> dict:
 
 # ── Node: context_claim_agent ─────────────────────────────────────────────────
 
-_CREDIBILITY_FILTER_THRESHOLD = 0.5   # Tavily results below this are dropped
+_CREDIBILITY_FILTER_THRESHOLD = 0.5  # Tavily results below this are dropped
 
 
 def context_claim_agent_node(state: FactCheckState, memory: "MemoryAgent", settings) -> dict:
@@ -235,10 +257,10 @@ def context_claim_agent_node(state: FactCheckState, memory: "MemoryAgent", setti
     from fact_check_agent.src.agents.reflection_agent import source_id_from_url
 
     claims = context_claim_agent.run(
-        claim_text        = state["input"].claim_text,
-        fresh_context     = state.get("fresh_context", []),
-        prefetched_chunks = state.get("retrieved_chunks", []),
-        tavily_api_key    = settings.tavily_api_key,
+        claim_text=state["input"].claim_text,
+        fresh_context=state.get("fresh_context", []),
+        prefetched_chunks=state.get("retrieved_chunks", []),
+        tavily_api_key=settings.tavily_api_key,
     )
 
     effective_topic = state.get("effective_topic", "") or state["input"].topic_text
@@ -267,7 +289,10 @@ def context_claim_agent_node(state: FactCheckState, memory: "MemoryAgent", setti
         if cred < _CREDIBILITY_FILTER_THRESHOLD:
             logger.info(
                 "context_claim_agent: dropped %s result (source_url=%s, credibility=%.3f < %.2f)",
-                claim["source"], source_url, cred, _CREDIBILITY_FILTER_THRESHOLD,
+                claim["source"],
+                source_url,
+                cred,
+                _CREDIBILITY_FILTER_THRESHOLD,
             )
             continue
 
@@ -276,12 +301,15 @@ def context_claim_agent_node(state: FactCheckState, memory: "MemoryAgent", setti
 
     logger.info(
         "context_claim_agent: %d/%d claims kept after credibility filter (threshold=%.2f)",
-        len(filtered), len(claims), _CREDIBILITY_FILTER_THRESHOLD,
+        len(filtered),
+        len(claims),
+        _CREDIBILITY_FILTER_THRESHOLD,
     )
     return {"context_claims": filtered}
 
 
 # ── Node: vlm_assessment ─────────────────────────────────────────────────────
+
 
 def vlm_assessment_node(state: FactCheckState, settings) -> dict:
     """Run VLM visual assessment — generates vlm_assessment_block for the Judge.
@@ -299,7 +327,7 @@ def vlm_assessment_node(state: FactCheckState, settings) -> dict:
 
     prompt = IMAGE_CLAIM_ASSESSOR_PROMPT.format(claim_text=inp.claim_text)
     client = _llm_factory.make_vlm_client()
-    model  = _llm_factory.vlm_model_name()
+    model = _llm_factory.vlm_model_name()
 
     try:
         if settings.llm_provider == "ollama":
@@ -348,7 +376,7 @@ def vlm_assessment_node(state: FactCheckState, settings) -> dict:
 
 # Credibility assigned to claims by source when no stored confidence is available
 _SOURCE_CREDIBILITY: dict[str, float] = {
-    "tavily":     0.75,
+    "tavily": 0.75,
     "prefetched": 0.70,
 }
 _DEFAULT_CREDIBILITY = 0.65
@@ -361,7 +389,7 @@ def _format_numbered_context_claims(context_claims: list[dict]) -> str:
         if c["type"] == "memory":
             prior = f" (prior verdict: {c['verdict']})" if c.get("verdict") else ""
             lines.append(f"[{i}] MEMORY — prior verified claim{prior}")
-            lines.append(f"    \"{c['content']}\"")
+            lines.append(f'    "{c["content"]}"')
         else:
             tag = "FACTUAL" if c["type"] == "factual" else "COUNTER-FACTUAL"
             lines.append(f"[{i}] {tag} ({c['source']})")
@@ -402,17 +430,17 @@ def _compute_verdict(
 
     Returns: (verdict_label, confidence_0_100, evidence_volume=Σ|Ci|)
     """
-    total_weighted    = 0.0
+    total_weighted = 0.0
     total_credibility = 0.0
 
     for i, claim in enumerate(context_claims):
         raw_d = degrees[i] if i < len(degrees) else 0.0
-        d = min(1.0, max(-1.0, float(raw_d)))   # clamp; snap to nearest valid value
+        d = min(1.0, max(-1.0, float(raw_d)))  # clamp; snap to nearest valid value
         c = _get_claim_credibility(claim)
-        total_weighted    += d * c
+        total_weighted += d * c
         total_credibility += abs(c)
 
-    evidence_volume = total_credibility   # Σ|Ci| — how much evidence we have
+    evidence_volume = total_credibility  # Σ|Ci| — how much evidence we have
 
     if total_credibility == 0:
         return "misleading", 50, 0.0
@@ -429,7 +457,7 @@ def _compute_verdict(
     # Confidence = verdict strength × volume factor
     # volume_factor → 1.0 as Σ|Ci| → 2.5 (≈ 3 tavily-credibility sources)
     volume_factor = min(1.0, evidence_volume / 2.5)
-    confidence    = int(min(97, max(15, abs(V) * 100 * (0.4 + 0.6 * volume_factor))))
+    confidence = int(min(97, max(15, abs(V) * 100 * (0.4 + 0.6 * volume_factor))))
 
     return verdict, confidence, evidence_volume
 
@@ -443,7 +471,7 @@ def synthesize_verdict(state: FactCheckState, settings) -> dict:
     """
     from fact_check_agent.src.id_utils import make_id
 
-    inp            = state["input"]
+    inp = state["input"]
     context_claims = state.get("context_claims") or []
     numbered_block = _format_numbered_context_claims(context_claims)
 
@@ -463,7 +491,9 @@ def synthesize_verdict(state: FactCheckState, settings) -> dict:
         raw = response.choices[0].message.content or ""
         if not raw.strip():
             # Ollama/Gemma3 sometimes returns empty content with json_object format
-            logger.warning("synthesize_verdict: empty response from LLM — retrying without json_object")
+            logger.warning(
+                "synthesize_verdict: empty response from LLM — retrying without json_object"
+            )
             response = client.chat.completions.create(
                 model=_llm_factory.llm_model_name(),
                 messages=[{"role": "user", "content": prompt + "\n\nRespond in JSON."}],
@@ -475,34 +505,37 @@ def synthesize_verdict(state: FactCheckState, settings) -> dict:
         logger.error("Verdict synthesis failed: %s", e)
         result = {"degrees": [], "reasoning": str(e)}
 
-    degrees   = [float(x) for x in result.get("degrees", [])]
+    degrees = [float(x) for x in result.get("degrees", [])]
     reasoning = result.get("reasoning", "")
     verdict, confidence, evidence_volume = _compute_verdict(context_claims, degrees)
 
     logger.info(
         "synthesize_verdict: V-formula → %s (confidence=%d, evidence_volume=%.2f, degrees=%s)",
-        verdict, confidence, evidence_volume,
+        verdict,
+        confidence,
+        evidence_volume,
         [round(d, 1) for d in degrees[:8]],
     )
 
     output = FactCheckOutput(
-        verdict_id              = make_id("vrd_"),
-        claim_id                = inp.claim_id,
-        verdict                 = verdict,
-        confidence_score        = confidence,
-        evidence_links          = [],
-        reasoning               = reasoning,
-        cross_modal_flag        = False,
-        vlm_assessment_block    = None,
+        verdict_id=make_id("vrd_"),
+        claim_id=inp.claim_id,
+        verdict=verdict,
+        confidence_score=confidence,
+        evidence_links=[],
+        reasoning=reasoning,
+        cross_modal_flag=False,
+        vlm_assessment_block=None,
     )
     return {
-        "output":           output,
-        "neutral_degrees":  degrees,
+        "output": output,
+        "neutral_degrees": degrees,
         "neutral_reasoning": reasoning,
     }
 
 
 # ── Node: multi_agent_debate (S4) ─────────────────────────────────────────────
+
 
 def _format_neutral_scores_block(context_claims: list[dict], degrees: list[float]) -> str:
     """Render each evidence item with its Neutral Di for the Supporter/Skeptic/Judge."""
@@ -515,7 +548,7 @@ def _format_neutral_scores_block(context_claims: list[dict], degrees: list[float
         lines.append(f"[{i}] {tag} | Neutral Di = {d:+.1f}")
         if claim.get("question"):
             lines.append(f"    Q: {claim['question']}")
-        lines.append(f"    \"{claim['content'][:200]}\"")
+        lines.append(f'    "{claim["content"][:200]}"')
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -538,17 +571,17 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
       VLM-only (use_debate=False, image present):
         Skips Supporter/Skeptic; Judge integrates only VLM signal into neutral Di.
     """
-    inp             = state["input"]
-    output          = state.get("output")
-    context_claims  = state.get("context_claims") or []
+    inp = state["input"]
+    output = state.get("output")
+    context_claims = state.get("context_claims") or []
     neutral_degrees = state.get("neutral_degrees") or []
     neutral_reasoning = state.get("neutral_reasoning") or ""
-    numbered_block  = _format_numbered_context_claims(context_claims)
-    neutral_block   = _format_neutral_scores_block(context_claims, neutral_degrees)
-    vlm_block       = state.get("vlm_assessment_block") or "No image available."
+    numbered_block = _format_numbered_context_claims(context_claims)
+    neutral_block = _format_neutral_scores_block(context_claims, neutral_degrees)
+    vlm_block = state.get("vlm_assessment_block") or "No image available."
 
     client = _llm_factory.make_llm_client()
-    model  = _llm_factory.llm_model_name()
+    model = _llm_factory.llm_model_name()
 
     def _call(prompt_text: str) -> str:
         resp = client.chat.completions.create(
@@ -564,47 +597,62 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
     try:
         if settings.use_debate:
             # ── Full S4: Supporter + Skeptic + Judge ──────────────────────────
-            supporter_raw = _call(SUPPORTER_PROMPT.format(
-                claim_text=inp.claim_text,
-                numbered_claims=numbered_block,
-                neutral_scores_block=neutral_block,
-            ))
+            supporter_raw = _call(
+                SUPPORTER_PROMPT.format(
+                    claim_text=inp.claim_text,
+                    numbered_claims=numbered_block,
+                    neutral_scores_block=neutral_block,
+                )
+            )
             supporter_result = json.loads(supporter_raw)
             supporter_adj = supporter_result.get("adjustments", [])
 
-            skeptic_raw = _call(SKEPTIC_PROMPT.format(
-                claim_text=inp.claim_text,
-                numbered_claims=numbered_block,
-                neutral_scores_block=neutral_block,
-            ))
+            skeptic_raw = _call(
+                SKEPTIC_PROMPT.format(
+                    claim_text=inp.claim_text,
+                    numbered_claims=numbered_block,
+                    neutral_scores_block=neutral_block,
+                )
+            )
             skeptic_result = json.loads(skeptic_raw)
             skeptic_adj = skeptic_result.get("adjustments", [])
 
             logger.info(
                 "multi_agent_debate: supporter proposed %d adjustments, skeptic proposed %d",
-                len(supporter_adj), len(skeptic_adj),
+                len(supporter_adj),
+                len(skeptic_adj),
             )
         else:
             # ── VLM-only: skip Supporter/Skeptic, Judge uses image signal only ─
             supporter_raw = "None — no debate was run"
-            skeptic_raw   = "None — no debate was run"
+            skeptic_raw = "None — no debate was run"
             supporter_adj = []
-            skeptic_adj   = []
+            skeptic_adj = []
             logger.info("multi_agent_debate: VLM-only judge path (use_debate=False)")
 
         # ── Fast-path: no debate + no image → skip LLM judge, use neutral verbatim ─
         if not settings.use_debate and vlm_block == "No image available.":
             final_degrees = list(neutral_degrees)
             verdict, confidence, _ = _compute_verdict(context_claims, final_degrees)
-            reasoning = neutral_reasoning or "No debate and no image assessment — using neutral agent's verdict."
-            updated_output = output.model_copy(update={
-                "verdict":          verdict,
-                "confidence_score": confidence,
-                "reasoning":        reasoning,
-            }) if output else output
+            reasoning = (
+                neutral_reasoning
+                or "No debate and no image assessment — using neutral agent's verdict."
+            )
+            updated_output = (
+                output.model_copy(
+                    update={
+                        "verdict": verdict,
+                        "confidence_score": confidence,
+                        "reasoning": reasoning,
+                    }
+                )
+                if output
+                else output
+            )
             logger.info(
                 "multi_agent_debate: skipped judge (no debate + no image) — verdict=%s confidence=%d",
-                verdict, confidence,
+                verdict,
+                confidence,
             )
             return {
                 "output": updated_output,
@@ -612,14 +660,16 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
             }
 
         # ── Role 4: Judge (always runs when debate mode or image is present) ───
-        judge_raw = _call(JUDGE_PROMPT.format(
-            claim_text=inp.claim_text,
-            numbered_claims=numbered_block,
-            neutral_scores_block=neutral_block,
-            supporter_adjustments=supporter_raw,
-            skeptic_adjustments=skeptic_raw,
-            vlm_assessment_block=vlm_block,
-        ))
+        judge_raw = _call(
+            JUDGE_PROMPT.format(
+                claim_text=inp.claim_text,
+                numbered_claims=numbered_block,
+                neutral_scores_block=neutral_block,
+                supporter_adjustments=supporter_raw,
+                skeptic_adjustments=skeptic_raw,
+                vlm_assessment_block=vlm_block,
+            )
+        )
         judge_result = json.loads(judge_raw)
 
         # Extract final Di per evidence item from Judge's output
@@ -646,7 +696,10 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
                 if delta > 0.5:
                     logger.warning(
                         "multi_agent_debate: clamping item %d (judge=%.1f → neutral=%.1f, delta=%.1f > 0.5)",
-                        i + 1, final_degrees[i], neutral_degrees[i], delta,
+                        i + 1,
+                        final_degrees[i],
+                        neutral_degrees[i],
+                        delta,
                     )
                     final_degrees[i] = neutral_degrees[i]
 
@@ -657,7 +710,9 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
             stalemate_penalty = min(15, stalemates * 5)
             confidence = max(15, confidence - stalemate_penalty)
 
-        verdict_explanation = judge_result.get("verdict_explanation") or judge_result.get("debate_summary", "")
+        verdict_explanation = judge_result.get("verdict_explanation") or judge_result.get(
+            "debate_summary", ""
+        )
         if settings.use_debate:
             reasoning = (
                 f"{neutral_reasoning}\n\n"
@@ -671,22 +726,29 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
                 f"=== JUDGE ===\n{judge_raw}"
             )
         else:
-            reasoning = (
-                f"{neutral_reasoning}\n\n"
-                f"[Judge: {verdict_explanation}]"
-            )
+            reasoning = f"{neutral_reasoning}\n\n[Judge: {verdict_explanation}]"
             transcript = f"=== JUDGE ONLY ===\n{judge_raw}"
 
-        updated_output = output.model_copy(update={
-            "verdict":          verdict,
-            "confidence_score": confidence,
-            "reasoning":        reasoning,
-        }) if output else output
+        updated_output = (
+            output.model_copy(
+                update={
+                    "verdict": verdict,
+                    "confidence_score": confidence,
+                    "reasoning": reasoning,
+                }
+            )
+            if output
+            else output
+        )
 
         logger.info(
             "multi_agent_debate: verdict=%s confidence=%d (stalemates=%d, "
             "supporter_adj=%d, skeptic_adj=%d, vlm=%s)",
-            verdict, confidence, stalemates, len(supporter_adj), len(skeptic_adj),
+            verdict,
+            confidence,
+            stalemates,
+            len(supporter_adj),
+            len(skeptic_adj),
             vlm_block != "No image available.",
         )
         return {"output": updated_output, "debate_transcript": transcript}
@@ -698,15 +760,16 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
 
 # ── Node: cross_modal_check ───────────────────────────────────────────────────
 
+
 def cross_modal_check(state: FactCheckState, settings) -> dict:
     """Cross-modal consistency check: SigLIP / Gemma4 vision / LLM caption (priority order)."""
-    inp    = state["input"]
+    inp = state["input"]
     result = check_cross_modal(
-        claim_text    = inp.claim_text,
-        image_caption = inp.image_caption,
-        api_key       = settings.openai_api_key,
-        model         = _llm_factory.llm_model_name(),
-        image_url     = getattr(inp, "image_url", None),
+        claim_text=inp.claim_text,
+        image_caption=inp.image_caption,
+        api_key=settings.openai_api_key,
+        model=_llm_factory.llm_model_name(),
+        image_url=getattr(inp, "image_url", None),
     )
 
     vlm_block = state.get("vlm_assessment_block") or "No image available."
@@ -714,27 +777,33 @@ def cross_modal_check(state: FactCheckState, settings) -> dict:
     current_output: Optional[FactCheckOutput] = state.get("output")
     updated_output = None
     if current_output:
-        updated_output = current_output.model_copy(update={
-            "cross_modal_flag":     result["flag"],
-            "vlm_assessment_block": vlm_block if vlm_block != "No image available." else None,
-        })
+        updated_output = current_output.model_copy(
+            update={
+                "cross_modal_flag": result["flag"],
+                "vlm_assessment_block": vlm_block if vlm_block != "No image available." else None,
+            }
+        )
 
     return {
-        "cross_modal_flag":     result["flag"],
+        "cross_modal_flag": result["flag"],
         "vlm_assessment_block": vlm_block if vlm_block != "No image available." else None,
         "clip_similarity_score": result.get("siglip_score"),
-        "output":                  updated_output or current_output,
+        "output": updated_output or current_output,
     }
 
 
 # ── Node: write_memory ────────────────────────────────────────────────────────
 
+
 def write_memory(state: FactCheckState, memory: "MemoryAgent") -> dict:
     """Delegate all 5 post-verdict write-backs to the Reflection Agent."""
     from fact_check_agent.src.config import settings as _settings
+
     if _settings.dry_run or _settings.offline_mode:
-        logger.info("write_memory: %s — skipping DB write",
-                    "offline_mode" if _settings.offline_mode else "dry_run")
+        logger.info(
+            "write_memory: %s — skipping DB write",
+            "offline_mode" if _settings.offline_mode else "dry_run",
+        )
         return {}
 
     output: Optional[FactCheckOutput] = state.get("output")
@@ -743,17 +812,18 @@ def write_memory(state: FactCheckState, memory: "MemoryAgent") -> dict:
         return {}
 
     record_verdict_outcome(
-        output     = output,
-        claim_text = state["input"].claim_text,
-        source_url = state["input"].source_url,
-        topic_text = state.get("effective_topic", "") or state["input"].topic_text,
-        memory     = memory,
+        output=output,
+        claim_text=state["input"].claim_text,
+        source_url=state["input"].source_url,
+        topic_text=state.get("effective_topic", "") or state["input"].topic_text,
+        memory=memory,
     )
     logger.info("write_memory: verdict %s written for claim %s", output.verdict, output.claim_id)
     return {}
 
 
 # ── Node: emit_output ─────────────────────────────────────────────────────────
+
 
 def emit_output(state: FactCheckState) -> dict:
     """Terminal node — stamps freshness metadata onto the output before returning."""

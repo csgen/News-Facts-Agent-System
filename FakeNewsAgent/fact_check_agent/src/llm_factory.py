@@ -7,6 +7,7 @@ so no other code changes are needed at call sites.
 When Langfuse is enabled, returns langfuse.openai.OpenAI so every LLM call
 is auto-traced without decorator boilerplate.
 """
+
 from typing import Optional
 
 from openai import OpenAI as _RawOpenAI
@@ -19,6 +20,7 @@ def _openai_cls():
     if settings.langfuse_enabled and settings.langfuse_public_key and settings.langfuse_secret_key:
         try:
             from langfuse.openai import OpenAI as _LfOpenAI
+
             return _LfOpenAI
         except Exception:
             pass
@@ -79,10 +81,11 @@ def get_langfuse_handler() -> Optional[object]:
         return None
     try:
         from langfuse.callback import CallbackHandler
+
         return CallbackHandler(
-            public_key = settings.langfuse_public_key,
-            secret_key = settings.langfuse_secret_key,
-            host       = settings.langfuse_host,
+            public_key=settings.langfuse_public_key,
+            secret_key=settings.langfuse_secret_key,
+            host=settings.langfuse_host,
         )
     except Exception:
         return None

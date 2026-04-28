@@ -8,6 +8,7 @@ Usage:
     python -m fact_check_agent.benchmark.seed_hitl_graph \\
         --train-path /path/to/liar/train.tsv
 """
+
 import argparse
 import logging
 
@@ -33,11 +34,11 @@ def seed_speaker_credibility(records: list[BenchmarkRecord]) -> int:
 
         try:
             memory._graph.merge_source(
-                source_id        = f"spk_{record.source_name.lower().replace(' ', '_')}",
-                name             = record.source_name,
-                domain           = record.source_domain,
-                category         = f"speaker_{record.party_affiliation or 'unknown'}",
-                base_credibility = record.speaker_credibility,
+                source_id=f"spk_{record.source_name.lower().replace(' ', '_')}",
+                name=record.source_name,
+                domain=record.source_domain,
+                category=f"speaker_{record.party_affiliation or 'unknown'}",
+                base_credibility=record.speaker_credibility,
             )
             seeded += 1
         except Exception as e:
