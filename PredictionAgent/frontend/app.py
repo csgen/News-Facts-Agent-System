@@ -21,6 +21,30 @@ import plotly.graph_objects as go
 import streamlit as st
 
 # ─────────────────────────────────────────────
+# Prometheus /metrics endpoint (port 8000)
+# Exposes counters/histograms registered in agents.fact_check_agent +
+# the queries counter below. Streamlit re-runs this script on every
+# interaction; the OSError catch makes the call idempotent.
+# ─────────────────────────────────────────────
+try:
+    from prometheus_client import Counter as _PromCounter
+    from prometheus_client import start_http_server as _start_metrics_server
+
+    try:
+        _start_metrics_server(int(os.getenv("UI_METRICS_PORT", "8000")))
+    except OSError:
+        pass  # already bound — Streamlit re-ran the script
+
+    _USER_QUERIES_TOTAL = _PromCounter(
+        "nfs_user_queries_total",
+        "Verify-button clicks in the Streamlit UI",
+    )
+except ImportError:
+    class _Noop:
+        def inc(self, *a, **kw): pass
+    _USER_QUERIES_TOTAL = _Noop()
+
+# ─────────────────────────────────────────────
 # SECOPS — LOGGING SETUP
 # ─────────────────────────────────────────────
 _LOG_DIR = Path(__file__).parent.parent / "logs"
@@ -949,6 +973,9 @@ st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 # RESULTS (shown after clicking VERIFY)
 # ─────────────────────────────────────────────
 if run_btn and user_input.strip():
+    # ── Prometheus: count Verify clicks ───────────────────────────────────
+    _USER_QUERIES_TOTAL.inc()
+
     # ── SecOps: Rate Limiting ─────────────────────────────────────────────
     if not _check_rate_limit():
         st.error(

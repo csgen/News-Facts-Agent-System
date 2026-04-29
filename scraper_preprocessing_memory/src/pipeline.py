@@ -1,9 +1,12 @@
 """End-to-end pipeline: Scraper → Preprocessing → Memory Agent."""
 
 import logging
+import os
 import time
+from datetime import datetime, timezone
 
 from src.config import settings
+from src.id_utils import make_id
 from src.memory.agent import MemoryAgent
 from src.preprocessing.agent import PreprocessingAgent
 from src.scraper.agent import ScraperAgent
@@ -18,9 +21,17 @@ logger = logging.getLogger(__name__)
 def run_pipeline(max_per_source: int = 20) -> dict:
     """Run the full data pipeline once.
 
-    Returns a summary dict with counts.
+    Returns a summary dict with counts. Also writes a (:ScrapeRun) node
+    to Neo4j summarising this run — Grafana queries those for the
+    "Scheduled scrapes" dashboard panels.
     """
     logger.info("Starting pipeline run...")
+
+    started_at = datetime.now(timezone.utc)
+    raw_articles: list = []
+    ingested = 0
+    skipped = 0
+    failed = 0
 
     scraper = ScraperAgent(settings)
     preprocessor = PreprocessingAgent(settings)
@@ -32,9 +43,6 @@ def run_pipeline(max_per_source: int = 20) -> dict:
         logger.info("Scraped %d raw articles", len(raw_articles))
 
         # Step 2: Preprocess + Ingest
-        ingested = 0
-        skipped = 0
-        failed = 0
 
         for raw in raw_articles:
             try:
@@ -90,6 +98,27 @@ def run_pipeline(max_per_source: int = 20) -> dict:
         return summary
 
     finally:
+        # ── ScrapeRun summary ────────────────────────────────────────────
+        # Persist a one-line summary of this run to Neo4j so Grafana can
+        # render the Scheduled-Scrapes dashboard panels (covers both local
+        # invocations AND GitHub Actions cron — same code path).
+        # `source` is "github_actions" inside Actions runners (which set
+        # GITHUB_ACTIONS=true automatically), "local" otherwise.
+        try:
+            finished_at = datetime.now(timezone.utc)
+            memory.add_scrape_run(
+                run_id=make_id("sr_"),
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_s=(finished_at - started_at).total_seconds(),
+                scraped=len(raw_articles),
+                ingested=ingested,
+                skipped=skipped,
+                failed=failed,
+                source="github_actions" if os.getenv("GITHUB_ACTIONS") == "true" else "local",
+            )
+        except Exception as e:
+            logger.error("Failed to record ScrapeRun summary: %s", e)
         memory.close()
 
 

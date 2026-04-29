@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana — declarative datasource provisioning.
+# Loaded automatically on container startup from /etc/grafana/provisioning/.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: 1
+
+datasources:
+
+  # Default datasource: live application + infrastructure metrics.
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+
+  # Neo4j datasource: used by the "Scheduled scrapes" panels for ScrapeRun
+  # history (one row per pipeline run, written from local + GH Actions).
+  # Requires the grafana-neo4j-datasource plugin (auto-installed via
+  # GF_INSTALL_PLUGINS env on the grafana container).
+  - name: Neo4j
+    type: grafana-neo4j-datasource
+    access: proxy
+    url: ${NEO4J_URI}
+    editable: true
+    jsonData:
+      database: neo4j
+      username: ${NEO4J_USER}
+    secureJsonData:
+      password: ${NEO4J_PASSWORD}

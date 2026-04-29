@@ -32,16 +32,18 @@ class GraphStore:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (cs:CredibilitySnapshot) REQUIRE cs.snapshot_id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Prediction) REQUIRE p.prediction_id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (t:Topic) REQUIRE t.name IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (sr:ScrapeRun) REQUIRE sr.run_id IS UNIQUE",
         ]
         indexes = [
             "CREATE INDEX IF NOT EXISTS FOR (c:Claim) ON (c.extracted_at)",
             "CREATE INDEX IF NOT EXISTS FOR (v:Verdict) ON (v.verified_at)",
             "CREATE INDEX IF NOT EXISTS FOR (p:Prediction) ON (p.deadline)",
+            "CREATE INDEX IF NOT EXISTS FOR (sr:ScrapeRun) ON (sr.started_at)",
         ]
         with self._driver.session() as session:
             for stmt in constraints + indexes:
                 session.run(stmt)
-        logger.info("Neo4j schema initialized (9 constraints, 3 indexes)")
+        logger.info("Neo4j schema initialized (10 constraints, 4 indexes)")
 
     # ── Write: Sources ──────────────────────────────────────────────────
 
@@ -922,3 +924,53 @@ class GraphStore:
                     entity_type=entity["entity_type"],
                     now=now,
                 )
+
+    # ── Write: ScrapeRun summary (called at end of pipeline.py) ─────────
+
+    def create_scrape_run(
+        self,
+        run_id: str,
+        started_at: datetime,
+        finished_at: datetime,
+        duration_s: float,
+        scraped: int,
+        ingested: int,
+        skipped: int,
+        failed: int,
+        source: str,
+    ) -> None:
+        """Persist a one-line summary of a pipeline run.
+
+        Written from both local `docker compose run scraper` invocations and
+        the GitHub Actions cron job — they share the same `pipeline.py` code
+        path. Grafana queries this label via the Neo4j datasource plugin to
+        show "Scheduled scrapes" panels with cron + manual runs interleaved.
+
+        `source` is "local" or "github_actions" (set by pipeline.py from the
+        GITHUB_ACTIONS env var that Actions runners populate automatically).
+        """
+        with self._driver.session() as session:
+            session.run(
+                """
+                CREATE (sr:ScrapeRun {
+                    run_id:      $run_id,
+                    started_at:  datetime($started_at),
+                    finished_at: datetime($finished_at),
+                    duration_s:  $duration_s,
+                    scraped:     $scraped,
+                    ingested:    $ingested,
+                    skipped:     $skipped,
+                    failed:      $failed,
+                    source:      $source
+                })
+                """,
+                run_id=run_id,
+                started_at=started_at.isoformat(),
+                finished_at=finished_at.isoformat(),
+                duration_s=duration_s,
+                scraped=scraped,
+                ingested=ingested,
+                skipped=skipped,
+                failed=failed,
+                source=source,
+            )

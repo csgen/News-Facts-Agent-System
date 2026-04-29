@@ -265,6 +265,62 @@ JINA_API_KEY=                              # leave blank for free tier; set for 
 
 ---
 
+## Monitoring (Prometheus + Grafana)
+
+The repo ships with an opt-in monitoring stack so you can see what the system is doing in real time. It is **off by default** — start it with the `monitoring` profile only when you want it.
+
+### What you get
+
+| Layer | Tool | What it shows |
+|---|---|---|
+| Application | Prometheus + Grafana | Verdict rate by label, fact-check latency p50/p95/p99, LLM API errors, queries/hour |
+| Database | metrics-collector sidecar | Neo4j node counts (Article, Claim, Verdict, …) and Chroma collection sizes |
+| Scheduled scrapes | Neo4j `(:ScrapeRun)` nodes | Each run (local + GitHub Actions cron) writes a summary; Grafana queries Neo4j directly to render history |
+| Infrastructure | cAdvisor + node-exporter | Per-container CPU/RAM/network and host-level CPU/load/disk free |
+
+LLM-level traces (per-prompt token usage, latency, full prompt/response) live separately in **Langfuse** if you've configured it — see the Langfuse env block in `.env.example`.
+
+### Starting the stack
+
+```bash
+# Cloud-default (Aura + Chroma Cloud) plus the monitoring stack
+docker compose -f docker/docker-compose.yml \
+               -f docker/docker-compose.local.yml \
+               --profile monitoring up -d
+
+# Or combined with local DBs (Mode B):
+docker compose -f docker/docker-compose.yml \
+               -f docker/docker-compose.local.yml \
+               --profile neo4j --profile chroma --profile monitoring up -d
+```
+
+### Endpoints
+
+| Service | URL | Purpose |
+|---|---|---|
+| Grafana | http://localhost:3001 (admin/admin → change on first login) | Dashboards. The `news_facts_system → overview` dashboard auto-loads. |
+| Prometheus | http://localhost:9090 | Direct PromQL exploration. `Status → Targets` shows scrape health. |
+| cAdvisor | http://localhost:8080 | Per-container metrics UI (also serves `/metrics` for Prometheus) |
+| node-exporter | http://localhost:9100/metrics | Host metrics (no UI, just metrics text) |
+| UI metrics | http://localhost:8000/metrics | Live counter/histogram values exposed by the Streamlit process |
+| Collector metrics | (only on Docker network) `metrics-collector:8001/metrics` | DB node-count gauges, polled every 5 min |
+
+### How the scraper appears on the dashboard
+
+The `scraper` and `init-db` services are one-shot containers — Prometheus can't scrape them because they exit before the next 15 s tick. Instead, `pipeline.py` writes a `(:ScrapeRun {run_id, started_at, finished_at, scraped, ingested, skipped, failed, source})` node to Neo4j on every run. Grafana queries Neo4j directly (via the auto-installed `grafana-neo4j-datasource` plugin) to render the "Scheduled scrapes" panels.
+
+The exact same code path runs in the GitHub Actions cron, with `source="github_actions"` set automatically (Actions runners populate `GITHUB_ACTIONS=true`). Local dev runs land with `source="local"`. Both flow into the same dashboard panels — your local Grafana sees cron history even when your laptop was off, because Neo4j Aura is the persistence layer.
+
+### Notes / quirks
+
+- **First-time `init-db`** — re-run it once after switching to monitoring; the new schema adds a uniqueness constraint and a time index on `:ScrapeRun`. Idempotent — it's only `CREATE … IF NOT EXISTS`.
+- **Aura quota** — the metrics collector polls every 5 min; ~6 short Cypher counts per round, ~1 700/day. Bump `METRICS_COLLECT_INTERVAL_S` in the env if you ever throttle.
+- **Streamlit reruns** — the UI starts a Prometheus HTTP server on port 8000 once; subsequent script reruns hit `OSError` on the bound port and silently no-op (intentional).
+- **Volumes** — all data lives under `docker/data/{prometheus,grafana}` (gitignored). `docker compose down` keeps it; `docker compose down -v` would NOT delete bind-mount data either, but `rm -rf docker/data/prometheus` would.
+- **No GH Actions plugin needed** — we read run outcomes via `(:ScrapeRun)` nodes (richer than what the GitHub API exposes anyway, and no PAT to manage).
+
+---
+
 ## Troubleshooting
 
 - **Streamlit can't connect to Neo4j** — verify `NEO4J_URI` in `.env` matches the mode.
