@@ -381,6 +381,33 @@ def get_real_verdict(query: str) -> dict:
         _display_claim = scraped["claim_text"][:200]
         claim_for_pipeline = scraped["claim_text"]
 
+        # ── SecOps: scan scraped content for indirect prompt injection ────────
+        # The URL itself may be clean but the article body could contain injections.
+        try:
+            from agents.input_guardrail import layer_a_check
+            _content_guard = layer_a_check(claim_for_pipeline)
+            if _content_guard["blocked"]:
+                _content_hash = hashlib.sha256(claim_for_pipeline.encode()).hexdigest()[:16]
+                _guardrail_log.warning(
+                    "BLOCKED_URL_CONTENT | hash=%s | url=%s | risk=%s | reason=%s",
+                    _content_hash, _article_url[:80], _content_guard["risk"], _content_guard["reason"],
+                )
+                return {
+                    "verdict_id":       "blocked",
+                    "label":            "misleading",
+                    "confidence":       0.0,
+                    "claim_text":       claim_for_pipeline[:200],
+                    "evidence_summary": (
+                        f"⚠️ Article content blocked [{_content_guard['risk']} risk]: "
+                        f"{_content_guard['reason']}"
+                    ),
+                    "sources": [],
+                    "image_url": "",
+                    "entities": [],
+                }
+        except Exception:
+            pass  # content scan failure never blocks the pipeline
+
         # Show what was extracted so user knows the pipeline is working on real content
         if scraped["title"]:
             st.info(f"**Article:** {scraped['title']}\n\n**Fact-checking:** {scraped['claim_text'][:200]}")
