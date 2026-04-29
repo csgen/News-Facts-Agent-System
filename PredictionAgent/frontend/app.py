@@ -335,8 +335,15 @@ def _scrape_article(url: str) -> dict:
             image_url = og_img["content"].strip()
 
         # ── Build claim text for the pipeline ──
+        # Priority: title+description → body → article domain label (never raw URL)
         parts = [p for p in [title, description] if p]
-        claim_text = ". ".join(parts) if parts else (body[:300] if body else url)
+        if parts:
+            claim_text = ". ".join(parts)
+        elif body:
+            claim_text = body[:400]
+        else:
+            domain = url.split("/")[2] if len(url.split("/")) > 2 else url
+            claim_text = f"Article from {domain}: {url}"
 
         return {
             "title":      title,
@@ -347,11 +354,12 @@ def _scrape_article(url: str) -> dict:
         }
 
     except Exception as e:
+        domain = url.split("/")[2] if len(url.split("/")) > 2 else url
         return {
             "title":      "",
             "body":       "",
             "image_url":  "",
-            "claim_text": url,
+            "claim_text": f"Article from {domain}: {url}",
             "error":      str(e),
         }
 
@@ -378,7 +386,8 @@ def get_real_verdict(query: str) -> dict:
                 _s.update(label=f"✅ Article loaded: {scraped['title'] or _article_url}", state="complete")
 
         _image_url     = scraped["image_url"]
-        _display_claim = scraped["claim_text"][:200]
+        # Prefer article title for display; fall back to extracted claim text
+        _display_claim = (scraped["title"] or scraped["claim_text"])[:200]
         claim_for_pipeline = scraped["claim_text"]
 
         # ── SecOps: scan scraped content for indirect prompt injection ────────
