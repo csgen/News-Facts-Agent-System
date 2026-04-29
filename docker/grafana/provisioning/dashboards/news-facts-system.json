@@ -1,0 +1,138 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+
+    { "type": "row", "title": "Application", "gridPos": {"h":1,"w":24,"x":0,"y":0}, "collapsed": false, "panels": [] },
+
+    {
+      "id": 1, "type": "timeseries", "title": "Verdict rate by label",
+      "gridPos": {"h":8,"w":12,"x":0,"y":1},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"sum by (label) (rate(nfs_factcheck_verdicts_total[5m]))","legendFormat":"{{label}}","refId":"A"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"reqps","custom":{"drawStyle":"area","stacking":{"mode":"normal"}}}}
+    },
+
+    {
+      "id": 2, "type": "timeseries", "title": "Fact-check latency (p50 / p95 / p99)",
+      "gridPos": {"h":8,"w":12,"x":12,"y":1},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"histogram_quantile(0.50, sum by (le) (rate(nfs_factcheck_latency_seconds_bucket[5m])))","legendFormat":"p50","refId":"A"},
+        {"expr":"histogram_quantile(0.95, sum by (le) (rate(nfs_factcheck_latency_seconds_bucket[5m])))","legendFormat":"p95","refId":"B"},
+        {"expr":"histogram_quantile(0.99, sum by (le) (rate(nfs_factcheck_latency_seconds_bucket[5m])))","legendFormat":"p99","refId":"C"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"s"}}
+    },
+
+    {
+      "id": 3, "type": "timeseries", "title": "LLM API errors per minute by provider",
+      "gridPos": {"h":8,"w":12,"x":0,"y":9},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"sum by (provider) (rate(nfs_llm_api_errors_total[5m])) * 60","legendFormat":"{{provider}}","refId":"A"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"short"}}
+    },
+
+    {
+      "id": 4, "type": "stat", "title": "User queries (last 1h)",
+      "gridPos": {"h":8,"w":12,"x":12,"y":9},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"sum(increase(nfs_user_queries_total[1h]))","refId":"A"}
+      ],
+      "options": {"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"value","graphMode":"area"}
+    },
+
+    { "type": "row", "title": "Database growth", "gridPos": {"h":1,"w":24,"x":0,"y":17}, "collapsed": false, "panels": [] },
+
+    {
+      "id": 5, "type": "timeseries", "title": "Neo4j node counts by label",
+      "gridPos": {"h":8,"w":12,"x":0,"y":18},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"nfs_db_node_count{store=\"neo4j\"}","legendFormat":"{{label}}","refId":"A"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"short"}}
+    },
+
+    {
+      "id": 6, "type": "timeseries", "title": "Chroma collection counts",
+      "gridPos": {"h":8,"w":12,"x":12,"y":18},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"nfs_db_node_count{store=\"chroma\"}","legendFormat":"{{label}}","refId":"A"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"short"}}
+    },
+
+    { "type": "row", "title": "Infrastructure", "gridPos": {"h":1,"w":24,"x":0,"y":26}, "collapsed": false, "panels": [] },
+
+    {
+      "id": 10, "type": "timeseries", "title": "Per-container CPU (cAdvisor)",
+      "gridPos": {"h":8,"w":12,"x":0,"y":27},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"nfs-.*\"}[5m]))","legendFormat":"{{name}}","refId":"A"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"percentunit"}}
+    },
+
+    {
+      "id": 11, "type": "timeseries", "title": "Per-container RAM (cAdvisor)",
+      "gridPos": {"h":8,"w":12,"x":12,"y":27},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"sum by (name) (container_memory_usage_bytes{name=~\"nfs-.*\"})","legendFormat":"{{name}}","refId":"A"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"bytes"}}
+    },
+
+    { "type": "row", "title": "User-perceived latency (whole VERIFY flow)", "gridPos": {"h":1,"w":24,"x":0,"y":35}, "collapsed": false, "panels": [] },
+
+    {
+      "id": 14, "type": "timeseries", "title": "Verify roundtrip — p50 / p95 / p99",
+      "gridPos": {"h":8,"w":12,"x":0,"y":36},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"histogram_quantile(0.50, sum by (le) (rate(nfs_user_verify_roundtrip_seconds_bucket[5m])))","legendFormat":"p50","refId":"A"},
+        {"expr":"histogram_quantile(0.95, sum by (le) (rate(nfs_user_verify_roundtrip_seconds_bucket[5m])))","legendFormat":"p95","refId":"B"},
+        {"expr":"histogram_quantile(0.99, sum by (le) (rate(nfs_user_verify_roundtrip_seconds_bucket[5m])))","legendFormat":"p99","refId":"C"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"s"}},
+      "description": "End-to-end seconds from VERIFY click to results stored in session_state. Includes input guardrail, decompose_input, claim ingest, fact-check graph(s), and render. Excludes early-exits (rate-limit / guardrail-blocked) by design."
+    },
+
+    {
+      "id": 15, "type": "timeseries", "title": "Verify roundtrip — average",
+      "gridPos": {"h":8,"w":12,"x":12,"y":36},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"sum(rate(nfs_user_verify_roundtrip_seconds_sum[5m])) / sum(rate(nfs_user_verify_roundtrip_seconds_count[5m]))","legendFormat":"avg","refId":"A"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"s"}},
+      "description": "Same metric, averaged. More stable than percentiles when traffic is sparse — the percentile panel artefacts at bucket boundaries with few observations."
+    }
+
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["news_facts_system"],
+  "templating": {"list":[]},
+  "time": {"from":"now-6h","to":"now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "news_facts_system — overview",
+  "uid": "nfs-overview",
+  "version": 1,
+  "weekStart": ""
+}

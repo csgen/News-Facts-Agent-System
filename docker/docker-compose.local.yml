@@ -1,7 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # news_facts_system — local-infrastructure overlay.
 #
-# Services are gated by Compose profiles so each can be opted into independently:
+# Holds the local-alternative services for teammates who don't use cloud
+# Aura / Chroma Cloud / OpenAI. Each service is gated by a Compose profile
+# so they can be opted into independently:
 #   neo4j     — local Neo4j 5-community (bolt://neo4j:7687, browser http://localhost:7474)
 #   chroma    — local ChromaDB (http://chroma:8000 inside the network)
 #   ollama    — local Ollama LLM server (http://ollama:11434)
@@ -15,6 +17,11 @@
 #   NEO4J_URI=bolt://neo4j:7687
 #   CHROMA_HOST=chroma   (and leave CHROMA_API_KEY blank)
 #   LLM_PROVIDER=ollama  OLLAMA_BASE_URL=http://ollama:11434/v1
+#
+# Monitoring (Prometheus + Grafana + cAdvisor + node-exporter + metrics-collector)
+# now lives in its own overlay: docker/docker-compose.monitoring.yml. That file
+# is independent of this one so cloud-default users (no local DBs) can run
+# monitoring without including this file.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:

@@ -15,10 +15,66 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import threading
+import time
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+# ─────────────────────────────────────────────
+# Prometheus /metrics endpoint (port 8000)
+# Exposes counters/histograms registered in agents.fact_check_agent +
+# the queries counter below. Streamlit re-runs this script on every
+# interaction, so we guard:
+#   - start_http_server: OSError on second call (port already bound)
+#   - Counter registration: ValueError (already in global REGISTRY)
+# ─────────────────────────────────────────────
+try:
+    from prometheus_client import REGISTRY as _PROM_REGISTRY
+    from prometheus_client import Counter as _PromCounter
+    from prometheus_client import Histogram as _PromHistogram
+    from prometheus_client import start_http_server as _start_metrics_server
+
+    try:
+        _start_metrics_server(int(os.getenv("UI_METRICS_PORT", "8000")))
+    except OSError:
+        pass  # already bound — Streamlit re-ran the script
+
+    try:
+        _USER_QUERIES_TOTAL = _PromCounter(
+            "nfs_user_queries_total",
+            "Verify-button clicks in the Streamlit UI",
+        )
+    except ValueError:
+        # Counter already in REGISTRY from a previous Streamlit script-run in
+        # this same Python process. Reuse the existing instance so increments
+        # land on the same time series.
+        _USER_QUERIES_TOTAL = _PROM_REGISTRY._names_to_collectors[
+            "nfs_user_queries_total"
+        ]
+
+    # Full-flow histogram: time from VERIFY click to results stored in
+    # session_state. Covers everything a user actually waits for —
+    # decompose_input + claim ingest + fact-check graph(s) + result render.
+    # Default histogram buckets stop at 10s; fact-check is regularly slower
+    # than that, so we use wider buckets that cover up to ~2 min.
+    _VERIFY_BUCKETS = (1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0, float("inf"))
+    try:
+        _VERIFY_ROUNDTRIP = _PromHistogram(
+            "nfs_user_verify_roundtrip_seconds",
+            "End-to-end UI roundtrip per VERIFY click — decompose + ingest + fact-check + render",
+            buckets=_VERIFY_BUCKETS,
+        )
+    except ValueError:
+        _VERIFY_ROUNDTRIP = _PROM_REGISTRY._names_to_collectors[
+            "nfs_user_verify_roundtrip_seconds"
+        ]
+except ImportError:
+    class _Noop:
+        def inc(self, *a, **kw): pass
+        def observe(self, *a, **kw): pass
+    _USER_QUERIES_TOTAL = _Noop()
+    _VERIFY_ROUNDTRIP = _Noop()
 
 # ─────────────────────────────────────────────
 # SECOPS — LOGGING SETUP
@@ -949,6 +1005,10 @@ st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 # RESULTS (shown after clicking VERIFY)
 # ─────────────────────────────────────────────
 if run_btn and user_input.strip():
+    # ── Prometheus: count Verify clicks + start roundtrip timer ───────────
+    _USER_QUERIES_TOTAL.inc()
+    _verify_t0 = time.monotonic()
+
     # ── SecOps: Rate Limiting ─────────────────────────────────────────────
     if not _check_rate_limit():
         st.error(
@@ -1001,6 +1061,11 @@ if run_btn and user_input.strip():
     st.session_state["_last_result"] = result
     st.session_state["_last_user_input"] = user_input
     st.session_state["_last_claim_text"] = result.get("claim_text", user_input)
+
+    # ── Prometheus: full UI-roundtrip latency for this Verify click ──────
+    # Note: early exits via st.stop() (rate-limit hit, guardrail blocked)
+    # bypass this observation on purpose — those weren't real fact-checks.
+    _VERIFY_ROUNDTRIP.observe(time.monotonic() - _verify_t0)
 
 # ── Restore result on reruns caused by widget interactions ───────────────────
 if not run_btn and "last_result" not in st.session_state:
