@@ -161,6 +161,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml \
 | `bench` | Run the fact-check benchmark on LIAR/FEVER/Factify | `docker compose run --rm bench` |
 | `shell` | Interactive bash inside the image | `docker compose run --rm shell` |
 | `neo4j`, `chroma`, `ollama`, `langfuse` | Local infra (in `docker-compose.local.yml`, gated by `--profile`) | see modes above |
+| `prometheus`, `grafana`, `cadvisor`, `metrics-collector` | Monitoring stack (in `docker-compose.monitoring.yml`, gated by `--profile monitoring`) | see "Monitoring" section below |
 
 `ui` does **not** depend on `scraper` at the service level — they communicate only through the DB. The UI keeps working whether the scraper is running or not.
 
@@ -193,9 +194,10 @@ news_facts_system/
 │   └── evaluation/
 │
 ├── docker/
-│   ├── Dockerfile                  # Unified Python 3.12 image
-│   ├── docker-compose.yml          # Cloud-default services (ui, scraper, …)
-│   └── docker-compose.local.yml    # Overlay with neo4j/chroma/ollama/langfuse profiles
+│   ├── Dockerfile                       # Unified Python 3.12 image
+│   ├── docker-compose.yml               # Cloud-default services (ui, scraper, …)
+│   ├── docker-compose.local.yml         # Overlay with neo4j/chroma/ollama/langfuse profiles
+│   └── docker-compose.monitoring.yml    # Overlay with prometheus/grafana/cadvisor/metrics-collector
 ├── requirements.txt                # Merged deps installed in the image
 ├── .env.example                    # Copy to .env
 └── README.md                       # This file
@@ -275,24 +277,25 @@ The repo ships with an opt-in monitoring stack so you can see what the system is
 |---|---|---|
 | Application | Prometheus + Grafana | Verdict rate by label, fact-check latency p50/p95/p99, LLM API errors, queries/hour |
 | Database | metrics-collector sidecar | Neo4j node counts (Article, Claim, Verdict, …) and Chroma collection sizes |
-| Scheduled scrapes | Neo4j `(:ScrapeRun)` nodes | Each run (local + GitHub Actions cron) writes a summary; Grafana queries Neo4j directly to render history |
-| Infrastructure | cAdvisor + node-exporter | Per-container CPU/RAM/network and host-level CPU/load/disk free |
+| Scheduled scrapes | Implicit via `nfs_db_node_count` | Successful cron scrapes show up as growth in `count(:Article)`, `count(:Claim)`, etc. (See "How the scraper appears on the dashboard" below for the future explicit-panel path.) |
+| Infrastructure | cAdvisor | Per-container CPU/RAM/network |
 
 LLM-level traces (per-prompt token usage, latency, full prompt/response) live separately in **Langfuse** if you've configured it — see the Langfuse env block in `.env.example`.
 
 ### Starting the stack
 
-```bash
-# Cloud-default (Aura + Chroma Cloud) plus the monitoring stack
-docker compose -f docker/docker-compose.yml \
-               -f docker/docker-compose.local.yml \
-               --profile monitoring up -d
+The monitoring stack lives in its own overlay file (`docker-compose.monitoring.yml`) so cloud-default users don't need to pull in `docker-compose.local.yml` (which is for local DB / LLM alternatives). The two overlays are independent and combinable.
 
-# Or combined with local DBs (Mode B):
-docker compose -f docker/docker-compose.yml \
-               -f docker/docker-compose.local.yml \
-               --profile neo4j --profile chroma --profile monitoring up -d
-```
+| Mode | Command |
+|---|---|
+| Cloud DBs only | `docker compose -f docker/docker-compose.yml up -d ui` |
+| Cloud DBs + monitoring | `docker compose -f docker/docker-compose.yml -f docker/docker-compose.monitoring.yml --profile monitoring up -d` |
+| Local DBs (Mode B) | `docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml --profile neo4j --profile chroma up -d` |
+| Local DBs + monitoring | `docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml -f docker/docker-compose.monitoring.yml --profile neo4j --profile chroma --profile monitoring up -d` |
+
+⚠️ When you also pass `--profile <X>`, run `up -d` with **no service name**. If you write `up -d ui`, Compose starts only the UI — naming a service narrows the start to that service plus its `depends_on:` chain, so anything brought in by `--profile X` is silently skipped. With no service name, Compose starts everything eligible: services without a profile *and* services whose profile is currently active.
+
+Stop the stack symmetrically — repeat the same `-f` files with `down` in place of `up -d`.
 
 ### Endpoints
 
@@ -301,15 +304,21 @@ docker compose -f docker/docker-compose.yml \
 | Grafana | http://localhost:3001 (admin/admin → change on first login) | Dashboards. The `news_facts_system → overview` dashboard auto-loads. |
 | Prometheus | http://localhost:9090 | Direct PromQL exploration. `Status → Targets` shows scrape health. |
 | cAdvisor | http://localhost:8080 | Per-container metrics UI (also serves `/metrics` for Prometheus) |
-| node-exporter | http://localhost:9100/metrics | Host metrics (no UI, just metrics text) |
 | UI metrics | http://localhost:8000/metrics | Live counter/histogram values exposed by the Streamlit process |
 | Collector metrics | (only on Docker network) `metrics-collector:8001/metrics` | DB node-count gauges, polled every 5 min |
 
 ### How the scraper appears on the dashboard
 
-The `scraper` and `init-db` services are one-shot containers — Prometheus can't scrape them because they exit before the next 15 s tick. Instead, `pipeline.py` writes a `(:ScrapeRun {run_id, started_at, finished_at, scraped, ingested, skipped, failed, source})` node to Neo4j on every run. Grafana queries Neo4j directly (via the auto-installed `grafana-neo4j-datasource` plugin) to render the "Scheduled scrapes" panels.
+The `scraper` and `init-db` services are one-shot containers — Prometheus can't scrape them because they exit before the next 15 s tick. Instead, `pipeline.py` writes a `(:ScrapeRun {run_id, started_at, finished_at, scraped, ingested, skipped, failed, source})` node to Neo4j at the end of every run.
 
-The exact same code path runs in the GitHub Actions cron, with `source="github_actions"` set automatically (Actions runners populate `GITHUB_ACTIONS=true`). Local dev runs land with `source="local"`. Both flow into the same dashboard panels — your local Grafana sees cron history even when your laptop was off, because Neo4j Aura is the persistence layer.
+**Indirect view (what's wired today):** the metrics-collector polls Neo4j every 5 min and exports `nfs_db_node_count` for every node label, including `Article` / `Claim` / `Verdict`. So when a scheduled scrape ingests new articles, the "Database growth" panel ticks up. That's enough signal for the dashboard to reflect cron activity without any Grafana plugin.
+
+**Explicit per-run view (future, optional):** for a panel showing one row per `ScrapeRun` (with `source: "local" | "github_actions"`, durations, failure counts), the standard pattern is to add a tiny REST endpoint to `scripts/metrics_collector.py` that returns the most recent `ScrapeRun` records as JSON, install the `yesoreyeram-infinity-datasource` plugin in Grafana, and add a Table panel pointing at the new endpoint. Skipped today to keep the stack lightweight and avoid Grafana plugin-registry churn.
+
+The same code path runs in the GitHub Actions cron, with `source="github_actions"` set automatically (Actions runners populate `GITHUB_ACTIONS=true`). Local dev runs land with `source="local"`. The `(:ScrapeRun)` data is in Neo4j Aura whether or not the dashboard surfaces it — you can always inspect via the Aura browser:
+```cypher
+MATCH (s:ScrapeRun) RETURN s ORDER BY s.started_at DESC LIMIT 20
+```
 
 ### Notes / quirks
 

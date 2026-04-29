@@ -24,9 +24,12 @@ import streamlit as st
 # Prometheus /metrics endpoint (port 8000)
 # Exposes counters/histograms registered in agents.fact_check_agent +
 # the queries counter below. Streamlit re-runs this script on every
-# interaction; the OSError catch makes the call idempotent.
+# interaction, so we guard:
+#   - start_http_server: OSError on second call (port already bound)
+#   - Counter registration: ValueError (already in global REGISTRY)
 # ─────────────────────────────────────────────
 try:
+    from prometheus_client import REGISTRY as _PROM_REGISTRY
     from prometheus_client import Counter as _PromCounter
     from prometheus_client import start_http_server as _start_metrics_server
 
@@ -35,10 +38,18 @@ try:
     except OSError:
         pass  # already bound — Streamlit re-ran the script
 
-    _USER_QUERIES_TOTAL = _PromCounter(
-        "nfs_user_queries_total",
-        "Verify-button clicks in the Streamlit UI",
-    )
+    try:
+        _USER_QUERIES_TOTAL = _PromCounter(
+            "nfs_user_queries_total",
+            "Verify-button clicks in the Streamlit UI",
+        )
+    except ValueError:
+        # Counter already in REGISTRY from a previous Streamlit script-run in
+        # this same Python process. Reuse the existing instance so increments
+        # land on the same time series.
+        _USER_QUERIES_TOTAL = _PROM_REGISTRY._names_to_collectors[
+            "nfs_user_queries_total"
+        ]
 except ImportError:
     class _Noop:
         def inc(self, *a, **kw): pass

@@ -94,18 +94,20 @@ def collect_neo4j(memory: MemoryAgent) -> None:
 
 
 def collect_chroma(memory: MemoryAgent) -> None:
-    """Read each Chroma collection's count via the existing VectorStore handles."""
+    """Read each Chroma collection's count via the existing VectorStore handles.
+
+    Tolerant of collections that don't exist on this VectorStore — getattr-with-
+    default skips them rather than aborting the whole poll round on AttributeError.
+    """
     vs = memory._vector
-    handles = {
-        "claims": vs._claims,
-        "articles": vs._articles,
-        "verdicts": vs._verdicts,
-        "image_captions": vs._image_captions,
-        "source_credibility": vs._source_credibility,
-    }
     for name in CHROMA_COLLECTIONS:
+        collection = getattr(vs, f"_{name}", None)
+        if collection is None:
+            # VectorStore doesn't expose this collection in its current build —
+            # silently skip so the rest of the poll round still runs.
+            continue
         try:
-            count = handles[name].count()
+            count = collection.count()
             DB_NODE_COUNT.labels(store="chroma", label=name).set(count)
         except Exception as e:
             logger.warning("Chroma count for %s failed: %s", name, e)

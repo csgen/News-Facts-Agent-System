@@ -1,12 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # news_facts_system — local-infrastructure overlay.
 #
-# Services are gated by Compose profiles so each can be opted into independently:
-#   neo4j       — local Neo4j 5-community (bolt://neo4j:7687, browser http://localhost:7474)
-#   chroma      — local ChromaDB (http://chroma:8000 inside the network)
-#   ollama      — local Ollama LLM server (http://ollama:11434)
-#   langfuse    — Postgres + Langfuse UI (http://localhost:3000)
-#   monitoring  — Prometheus + Grafana + cAdvisor + node-exporter + metrics-collector
+# Holds the local-alternative services for teammates who don't use cloud
+# Aura / Chroma Cloud / OpenAI. Each service is gated by a Compose profile
+# so they can be opted into independently:
+#   neo4j     — local Neo4j 5-community (bolt://neo4j:7687, browser http://localhost:7474)
+#   chroma    — local ChromaDB (http://chroma:8000 inside the network)
+#   ollama    — local Ollama LLM server (http://ollama:11434)
+#   langfuse  — Postgres + Langfuse UI (http://localhost:3000)
 #
 # Activate with --profile flags, e.g.:
 #   docker compose -f docker/docker-compose.yml -f docker/docker-compose.local.yml \
@@ -16,6 +17,11 @@
 #   NEO4J_URI=bolt://neo4j:7687
 #   CHROMA_HOST=chroma   (and leave CHROMA_API_KEY blank)
 #   LLM_PROVIDER=ollama  OLLAMA_BASE_URL=http://ollama:11434/v1
+#
+# Monitoring (Prometheus + Grafana + cAdvisor + node-exporter + metrics-collector)
+# now lives in its own overlay: docker/docker-compose.monitoring.yml. That file
+# is independent of this one so cloud-default users (no local DBs) can run
+# monitoring without including this file.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -117,102 +123,6 @@ services:
       NEXTAUTH_SECRET: news-facts-langfuse-secret
       SALT: news-facts-langfuse-salt
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
-    networks:
-      - news_facts_net
-
-  # ── Monitoring stack (profile: monitoring) ────────────────────────────────
-  # Prometheus + Grafana + cAdvisor + node_exporter + metrics-collector.
-  # Activate with:  --profile monitoring
-  # See README "Monitoring" section for details.
-
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: nfs-prometheus
-    profiles: ["monitoring"]
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=30d"
-      - "--web.enable-lifecycle"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./data/prometheus:/prometheus
-    networks:
-      - news_facts_net
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: nfs-grafana
-    profiles: ["monitoring"]
-    restart: unless-stopped
-    ports:
-      - "3001:3000"   # 3001 on host avoids clashing with Langfuse (3000)
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      # Auto-install the Neo4j datasource plugin so the ScrapeRun panels work.
-      GF_INSTALL_PLUGINS: grafana-neo4j-datasource
-      # Pass through Neo4j creds so the provisioned datasource can render env vars.
-      NEO4J_URI: ${NEO4J_URI:-bolt://neo4j:7687}
-      NEO4J_USER: ${NEO4J_USER:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-fakenews123}
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./data/grafana:/var/lib/grafana
-    depends_on:
-      - prometheus
-    networks:
-      - news_facts_net
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
-    container_name: nfs-cadvisor
-    profiles: ["monitoring"]
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker:/var/lib/docker:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - news_facts_net
-    privileged: true     # required on some hosts for full container metrics
-
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: nfs-node-exporter
-    profiles: ["monitoring"]
-    restart: unless-stopped
-    ports:
-      - "9100:9100"
-    command:
-      - "--path.rootfs=/host"
-    volumes:
-      - /:/host:ro,rslave
-    networks:
-      - news_facts_net
-
-  # Custom sidecar: polls Neo4j + Chroma every 5 min and exposes /metrics on 8001.
-  # Re-uses the unified news_facts_system image so it has MemoryAgent available.
-  metrics-collector:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    image: news_facts_system:latest
-    container_name: nfs-metrics-collector
-    profiles: ["monitoring"]
-    restart: unless-stopped
-    working_dir: /app/scraper_preprocessing_memory
-    command: ["python", "scripts/metrics_collector.py"]
-    env_file: ../.env
-    volumes:
-      - ..:/app
     networks:
       - news_facts_net
 

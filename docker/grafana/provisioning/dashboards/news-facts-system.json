@@ -74,49 +74,11 @@
       "fieldConfig": {"defaults":{"unit":"short"}}
     },
 
-    { "type": "row", "title": "Scheduled scrapes (from Neo4j)", "gridPos": {"h":1,"w":24,"x":0,"y":26}, "collapsed": false, "panels": [] },
-
-    {
-      "id": 7, "type": "table", "title": "Recent ScrapeRun records",
-      "gridPos": {"h":10,"w":24,"x":0,"y":27},
-      "datasource": {"type":"grafana-neo4j-datasource","uid":"neo4j"},
-      "targets": [
-        {
-          "refId": "A",
-          "queryText": "MATCH (s:ScrapeRun) WHERE s.started_at > datetime() - duration('P30D') RETURN s.started_at AS started_at, s.source AS source, s.scraped AS scraped, s.ingested AS ingested, s.skipped AS skipped, s.failed AS failed, s.duration_s AS duration_s ORDER BY s.started_at DESC LIMIT 50"
-        }
-      ]
-    },
-
-    {
-      "id": 8, "type": "timeseries", "title": "Articles ingested per scrape (30d)",
-      "gridPos": {"h":8,"w":12,"x":0,"y":37},
-      "datasource": {"type":"grafana-neo4j-datasource","uid":"neo4j"},
-      "targets": [
-        {
-          "refId": "A",
-          "queryText": "MATCH (s:ScrapeRun) WHERE s.started_at > datetime() - duration('P30D') RETURN s.started_at AS time, s.ingested AS ingested ORDER BY s.started_at"
-        }
-      ]
-    },
-
-    {
-      "id": 9, "type": "timeseries", "title": "Errors per scrape (30d)",
-      "gridPos": {"h":8,"w":12,"x":12,"y":37},
-      "datasource": {"type":"grafana-neo4j-datasource","uid":"neo4j"},
-      "targets": [
-        {
-          "refId": "A",
-          "queryText": "MATCH (s:ScrapeRun) WHERE s.started_at > datetime() - duration('P30D') RETURN s.started_at AS time, s.failed AS failed ORDER BY s.started_at"
-        }
-      ]
-    },
-
-    { "type": "row", "title": "Infrastructure", "gridPos": {"h":1,"w":24,"x":0,"y":45}, "collapsed": false, "panels": [] },
+    { "type": "row", "title": "Infrastructure", "gridPos": {"h":1,"w":24,"x":0,"y":26}, "collapsed": false, "panels": [] },
 
     {
       "id": 10, "type": "timeseries", "title": "Per-container CPU (cAdvisor)",
-      "gridPos": {"h":8,"w":12,"x":0,"y":46},
+      "gridPos": {"h":8,"w":12,"x":0,"y":27},
       "datasource": {"type":"prometheus","uid":"prometheus"},
       "targets": [
         {"expr":"sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"nfs-.*\"}[5m]))","legendFormat":"{{name}}","refId":"A"}
@@ -126,33 +88,12 @@
 
     {
       "id": 11, "type": "timeseries", "title": "Per-container RAM (cAdvisor)",
-      "gridPos": {"h":8,"w":12,"x":12,"y":46},
+      "gridPos": {"h":8,"w":12,"x":12,"y":27},
       "datasource": {"type":"prometheus","uid":"prometheus"},
       "targets": [
         {"expr":"container_memory_usage_bytes{name=~\"nfs-.*\"}","legendFormat":"{{name}}","refId":"A"}
       ],
       "fieldConfig": {"defaults":{"unit":"bytes"}}
-    },
-
-    {
-      "id": 12, "type": "timeseries", "title": "Host CPU & load (node-exporter)",
-      "gridPos": {"h":8,"w":12,"x":0,"y":54},
-      "datasource": {"type":"prometheus","uid":"prometheus"},
-      "targets": [
-        {"expr":"100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)","legendFormat":"CPU %","refId":"A"},
-        {"expr":"node_load1","legendFormat":"load1","refId":"B"}
-      ],
-      "fieldConfig": {"defaults":{"unit":"short"}}
-    },
-
-    {
-      "id": 13, "type": "timeseries", "title": "Host disk free % (node-exporter)",
-      "gridPos": {"h":8,"w":12,"x":12,"y":54},
-      "datasource": {"type":"prometheus","uid":"prometheus"},
-      "targets": [
-        {"expr":"100 * node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\"}","legendFormat":"{{mountpoint}}","refId":"A"}
-      ],
-      "fieldConfig": {"defaults":{"unit":"percent"}}
     }
 
   ],

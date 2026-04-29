@@ -1,11 +1,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Prometheus scrape config for news_facts_system.
 #
-# Four scrape jobs:
+# Three scrape jobs:
 #   ui                — counters/histogram from PredictionAgent's Streamlit process
 #   metrics-collector — DB-size gauges (Neo4j + Chroma), polled at 5 min cadence
 #   cadvisor          — per-container metrics (CPU/RAM/network/disk per service)
-#   node-exporter     — host-level metrics (CPU/load/disk/network)
 #
 # The scraper container itself has NO /metrics port and is intentionally absent
 # here — it's a one-shot, ephemeral process. Its outcomes flow into the
@@ -31,7 +30,3 @@ scrape_configs:
   - job_name: cadvisor
     static_configs:
       - targets: ['cadvisor:8080']
-
-  - job_name: node-exporter
-    static_configs:
-      - targets: ['node-exporter:9100']
