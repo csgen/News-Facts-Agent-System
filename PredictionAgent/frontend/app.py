@@ -414,6 +414,32 @@ def get_real_verdict(query: str) -> dict:
     if not claim_ids:
         return _empty_result(query, "No claims could be extracted from this input.")
 
+    # ── SecOps: scan extracted claims for indirect prompt injection ───────
+    # Protects against malicious article content that bypasses URL-level checks.
+    try:
+        from agents.input_guardrail import layer_a_check
+        _mem_scan = _get_memory()
+        if _mem_scan:
+            for _cid in claim_ids:
+                _claim_docs = _mem_scan.get_claims_by_ids([_cid])
+                _claim_texts = _claim_docs.get("documents") or []
+                for _ct in _claim_texts:
+                    if not _ct:
+                        continue
+                    _cg = layer_a_check(_ct)
+                    if _cg["blocked"]:
+                        _ch = hashlib.sha256(_ct.encode()).hexdigest()[:16]
+                        _guardrail_log.warning(
+                            "BLOCKED_URL_CONTENT | hash=%s | risk=%s | reason=%s",
+                            _ch, _cg["risk"], _cg["reason"],
+                        )
+                        return _empty_result(
+                            query,
+                            f"⚠️ Article content blocked [{_cg['risk']} risk]: {_cg['reason']}",
+                        )
+    except Exception:
+        pass  # scan failure never blocks the pipeline
+
     # ── Fact-check each ingested claim ──────────────────────────────────
     try:
         from agents.fact_check_agent import run_fact_check_by_claim_ids
