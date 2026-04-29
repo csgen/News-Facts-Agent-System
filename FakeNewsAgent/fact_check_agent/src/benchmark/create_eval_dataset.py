@@ -23,6 +23,7 @@ Usage:
     --target N      Target rows per bucket (default: 1000)
     --seed N        Random seed (default: 42)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,36 +45,34 @@ logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-DATASET_ROOT = (
-    Path(__file__).resolve().parents[3] / "datasets" / "Factify2" / "Factify 2"
-)
-MAPPING_PATH  = DATASET_ROOT.parent / "url_to_local.json"
-OUT_DIR       = DATASET_ROOT.parents[1] / "eval_dataset"
-CACHE_PATH    = OUT_DIR / "topic_cache.json"
-VOCAB_PATH    = OUT_DIR / "topic_vocabulary.json"
-OUT_CSV       = OUT_DIR / "eval_6k.csv"
+DATASET_ROOT = Path(__file__).resolve().parents[3] / "datasets" / "Factify2" / "Factify 2"
+MAPPING_PATH = DATASET_ROOT.parent / "url_to_local.json"
+OUT_DIR = DATASET_ROOT.parents[1] / "eval_dataset"
+CACHE_PATH = OUT_DIR / "topic_cache.json"
+VOCAB_PATH = OUT_DIR / "topic_vocabulary.json"
+OUT_CSV = OUT_DIR / "eval_6k.csv"
 
 SPLIT_PATHS = {
     "train": DATASET_ROOT / "factify2_train" / "factify2" / "train.csv",
-    "val":   DATASET_ROOT / "factify2_train" / "factify2" / "val.csv",
+    "val": DATASET_ROOT / "factify2_train" / "factify2" / "val.csv",
 }
 
 BUCKET_DEFS = {
-    "text_supported":   {"category": "Support_Text",            "needs_image": False},
-    "text_misleading":  {"category": "Insufficient_Text",       "needs_image": False},
-    "text_refuted":     {"category": "Refute",                  "needs_image": False, "image_present": False},
-    "modal_supported":  {"category": "Support_Multimodal",      "needs_image": True},
+    "text_supported": {"category": "Support_Text", "needs_image": False},
+    "text_misleading": {"category": "Insufficient_Text", "needs_image": False},
+    "text_refuted": {"category": "Refute", "needs_image": False, "image_present": False},
+    "modal_supported": {"category": "Support_Multimodal", "needs_image": True},
     "modal_misleading": {"category": "Insufficient_Multimodal", "needs_image": True},
-    "modal_refuted":    {"category": "Refute",                  "needs_image": True,  "image_present": True},
+    "modal_refuted": {"category": "Refute", "needs_image": True, "image_present": True},
 }
 
 BUCKET_LABEL = {
-    "text_supported":   "supported",
-    "text_misleading":  "misleading",
-    "text_refuted":     "refuted",
-    "modal_supported":  "supported",
+    "text_supported": "supported",
+    "text_misleading": "misleading",
+    "text_refuted": "refuted",
+    "modal_supported": "supported",
     "modal_misleading": "misleading",
-    "modal_refuted":    "refuted",
+    "modal_refuted": "refuted",
 }
 
 TOPIC_PROMPT = """\
@@ -119,7 +118,7 @@ def _claim_key(claim: str) -> str:
 
 def _extract_topics_batch(claims: list[str], model: str, client: OpenAI) -> list[list[str]]:
     """Extract topics for a batch of claims in one Ollama call."""
-    numbered = "\n".join(f"{i+1}. {c.strip()}" for i, c in enumerate(claims))
+    numbered = "\n".join(f"{i + 1}. {c.strip()}" for i, c in enumerate(claims))
     prompt = TOPIC_PROMPT.format(claims=numbered)
     try:
         resp = client.chat.completions.create(
@@ -134,8 +133,7 @@ def _extract_topics_batch(claims: list[str], model: str, client: OpenAI) -> list
         result = json.loads(raw)
         if isinstance(result, list) and len(result) == len(claims):
             return [
-                [str(t).lower().strip() for t in row if t]
-                if isinstance(row, list) else []
+                [str(t).lower().strip() for t in row if t] if isinstance(row, list) else []
                 for row in result
             ]
     except Exception as e:
@@ -153,9 +151,11 @@ def extract_topics(claims: list[str], model: str, workers: int) -> dict[str, lis
             cache = json.load(f)
 
     pending = [c for c in claims if _claim_key(c) not in cache]
-    batches = [pending[i: i + BATCH_SIZE] for i in range(0, len(pending), BATCH_SIZE)]
-    print(f"\nTopic extraction: {len(claims)} total, {len(cache)} cached, "
-          f"{len(pending)} pending → {len(batches)} batches of {BATCH_SIZE}")
+    batches = [pending[i : i + BATCH_SIZE] for i in range(0, len(pending), BATCH_SIZE)]
+    print(
+        f"\nTopic extraction: {len(claims)} total, {len(cache)} cached, "
+        f"{len(pending)} pending → {len(batches)} batches of {BATCH_SIZE}"
+    )
 
     if not batches:
         return cache
@@ -165,8 +165,7 @@ def extract_topics(claims: list[str], model: str, workers: int) -> dict[str, lis
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(_extract_topics_batch, batch, model, client): batch
-            for batch in batches
+            pool.submit(_extract_topics_batch, batch, model, client): batch for batch in batches
         }
         with tqdm(total=len(pending), desc="Topics", unit="claim") as bar:
             for future in as_completed(futures):
@@ -198,7 +197,7 @@ def normalize_vocabulary(raw_tags: set[str], model: str) -> dict[str, str]:
     mapping: dict[str, str] = {}
 
     for i in range(0, len(tag_list), CHUNK):
-        chunk = tag_list[i: i + CHUNK]
+        chunk = tag_list[i : i + CHUNK]
         prompt = NORMALIZE_PROMPT.format(tags=json.dumps(chunk, indent=2))
         try:
             resp = client.chat.completions.create(
@@ -265,10 +264,10 @@ def stratified_sample(
 
     freq = Counter(t for topics in topic_lists for t in topics)
 
-    weights = np.array([
-        sum(1.0 / freq[t] for t in topics) if topics else 1.0
-        for topics in topic_lists
-    ], dtype=float)
+    weights = np.array(
+        [sum(1.0 / freq[t] for t in topics) if topics else 1.0 for topics in topic_lists],
+        dtype=float,
+    )
 
     # Cap at available rows
     n = min(n, len(df))
@@ -281,15 +280,27 @@ def stratified_sample(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create stratified 6k eval dataset from Factify2.")
-    parser.add_argument("--model",   default="nemotron-3-nano:4b",
-                        help="Ollama model for topic extraction (default: nemotron-3-nano:4b)")
-    parser.add_argument("--workers", type=int, default=8,
-                        help="Parallel workers for topic extraction (default: 8)")
-    parser.add_argument("--pool",    type=int, default=3000,
-                        help="Max rows per bucket to extract topics for (default: 3000)")
-    parser.add_argument("--target",  type=int, default=1000,
-                        help="Target rows per bucket in final dataset (default: 1000)")
-    parser.add_argument("--seed",    type=int, default=42)
+    parser.add_argument(
+        "--model",
+        default="nemotron-3-nano:4b",
+        help="Ollama model for topic extraction (default: nemotron-3-nano:4b)",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=8, help="Parallel workers for topic extraction (default: 8)"
+    )
+    parser.add_argument(
+        "--pool",
+        type=int,
+        default=3000,
+        help="Max rows per bucket to extract topics for (default: 3000)",
+    )
+    parser.add_argument(
+        "--target",
+        type=int,
+        default=1000,
+        help="Target rows per bucket in final dataset (default: 1000)",
+    )
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -318,18 +329,12 @@ def main() -> None:
         print(f"  {name:25s}: {len(pools[name])} in pool")
 
     # 3. Extract topics for all pool rows
-    all_claims = list({
-        row["claim"]
-        for df in pools.values()
-        for _, row in df.iterrows()
-    })
+    all_claims = list({row["claim"] for df in pools.values() for _, row in df.iterrows()})
     topic_cache = extract_topics(all_claims, args.model, args.workers)
 
     # 4. Attach raw topics to each pool row
     for name, df in pools.items():
-        df["raw_topics"] = df["claim"].apply(
-            lambda c: topic_cache.get(_claim_key(c), [])
-        )
+        df["raw_topics"] = df["claim"].apply(lambda c: topic_cache.get(_claim_key(c), []))
 
     # 5. Normalize vocabulary
     all_raw = {t for df in pools.values() for topics in df["raw_topics"] for t in topics}
@@ -370,16 +375,15 @@ def main() -> None:
 
     # Compute topic vocabulary with frequencies
     from collections import Counter
-    topic_freq = Counter(
-        t for topics in result["topics"] for t in topics
-    )
+
+    topic_freq = Counter(t for topics in result["topics"] for t in topics)
     vocab_out = [{"topic": t, "count": c} for t, c in topic_freq.most_common()]
 
     result.to_csv(OUT_CSV, sep="\t", index=False)
     with VOCAB_PATH.open("w") as f:
         json.dump(vocab_out, f, indent=2)
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Eval dataset saved to : {OUT_CSV}")
     print(f"Topic vocabulary saved: {VOCAB_PATH}")
     print(f"Total rows            : {len(result)}")

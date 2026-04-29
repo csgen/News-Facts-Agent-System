@@ -42,7 +42,6 @@ class VectorStore:
         self._articles = self._client.get_or_create_collection("articles")
         self._verdicts = self._client.get_or_create_collection("verdicts")
         self._image_captions = self._client.get_or_create_collection("image_captions")
-        self._source_credibility = self._client.get_or_create_collection("source_credibility")
 
     # ── Claims ──────────────────────────────────────────────────────────
 
@@ -265,42 +264,3 @@ class VectorStore:
     def get_caption_by_article(self, article_id: str) -> dict:
         return self._image_captions.get(where={"article_id": article_id})
 
-    # ── Source Credibility (for Reflection Agent) ───────────────────────
-
-    def upsert_source_credibility_point(
-        self,
-        point_id: str,
-        embedding: list[float],
-        document: str,
-        source_id: str,
-        credibility: float,
-        verdict_label: str,
-        verdict_id: str,
-        created_at: str,
-    ) -> None:
-        """Append a (source, topic, credibility) observation."""
-        self._source_credibility.upsert(
-            ids=[point_id],
-            embeddings=[embedding],
-            documents=[document],
-            metadatas=[{
-                "source_id": source_id,
-                "credibility": credibility,
-                "verdict_label": verdict_label,
-                "verdict_id": verdict_id,
-                "created_at": created_at,
-            }],
-        )
-
-    def query_source_credibility(
-        self,
-        query_embedding: list[float],
-        source_id: str,
-        k: int = 20,
-    ) -> dict:
-        """Retrieve k nearest (source, topic) observations for a given source."""
-        return self._source_credibility.query(
-            query_embeddings=[query_embedding],
-            n_results=k,
-            where={"source_id": source_id},
-        )

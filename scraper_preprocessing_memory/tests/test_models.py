@@ -69,7 +69,6 @@ class TestVerdict:
                 label="supported",
                 confidence=1.5,
                 evidence_summary="test",
-                bias_score=0.1,
                 verified_at=datetime.now(timezone.utc),
             )
 

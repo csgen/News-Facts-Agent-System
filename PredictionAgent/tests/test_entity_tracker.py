@@ -6,6 +6,7 @@ fast and require no external services. They cover:
     - All-supported claims → high credibility, but capped by Bayesian volume shrinkage
     - All-refuted claims → low credibility
 """
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -50,18 +51,19 @@ def test_compute_credibility_single_claim_volume_shrinkage_pulls_toward_prior():
           → 0.5*(1-0.283) + 1.0*0.283 ≈ 0.642
     """
     score = compute_credibility_score([_claim("supported", confidence=1.0)])
-    assert 0.6 <= score <= 0.7, (
-        f"expected [0.6, 0.7] (shrinkage active), got {score:.4f}"
-    )
+    assert 0.6 <= score <= 0.7, f"expected [0.6, 0.7] (shrinkage active), got {score:.4f}"
 
 
-@pytest.mark.parametrize("label,expected_range", [
-    # 5 claims, conf=0.9, days_ago=0 → volume_factor ≈ 0.811, evidence = LABEL_SCORE
-    # → score = 0.5*0.189 + LABEL_SCORE * 0.811
-    ("supported",  (0.85, 1.0)),     # 1.0   → ~0.905
-    ("misleading", (0.30, 0.45)),    # 0.35  → ~0.378  (label_score below prior)
-    ("refuted",    (0.0, 0.15)),     # 0.0   → ~0.094
-])
+@pytest.mark.parametrize(
+    "label,expected_range",
+    [
+        # 5 claims, conf=0.9, days_ago=0 → volume_factor ≈ 0.811, evidence = LABEL_SCORE
+        # → score = 0.5*0.189 + LABEL_SCORE * 0.811
+        ("supported", (0.85, 1.0)),  # 1.0   → ~0.905
+        ("misleading", (0.30, 0.45)),  # 0.35  → ~0.378  (label_score below prior)
+        ("refuted", (0.0, 0.15)),  # 0.0   → ~0.094
+    ],
+)
 def test_compute_credibility_label_score_mapping(label, expected_range):
     """Each verdict label maps to a distinct credibility range."""
     claims = [_claim(label, confidence=0.9) for _ in range(5)]

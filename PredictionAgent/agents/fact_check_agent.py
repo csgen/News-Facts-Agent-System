@@ -2,18 +2,19 @@
 
 Public API for Streamlit frontend and other PredictionAgent code:
 
-    from agents.fact_check_agent import run_fact_check, fact_check_claim
+    from agents.fact_check_agent import run_fact_check, run_fact_check_by_claim_ids
 
-    # Option A: full pipeline from a PreprocessingOutput
+    # Option A: full pipeline from a fresh PreprocessingOutput (cold path)
     outputs = run_fact_check(preprocessing_output)
 
-    # Option B: quick check from raw claim text (creates synthetic context)
-    output = fact_check_claim("Tesla recalled 500k vehicles due to brake defects")
+    # Option B: by already-ingested claim_ids (cache-hit path; fetches from DB)
+    outputs = run_fact_check_by_claim_ids(["clm_abc...", "clm_def..."])
 
 This file lives in the integrated monorepo and bridges the three subfolders
 by adjusting sys.path so `src.*` (scraper) and `fact_check_agent.src.*`
 (FakeNewsAgent) resolve from this process.
 """
+
 import logging
 import sys
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ for _p in (str(_SCAPPER), str(_SCAPPER / "src"), str(_REPO_ROOT / "FakeNewsAgent
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from fact_check_agent.src.llm_factory import get_langfuse_handler
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
 from src.id_utils import make_id
 from src.models.pipeline import PreprocessingOutput
@@ -46,6 +48,7 @@ def _get_graph():
     global _graph
     if _graph is None:
         from fact_check_agent.src.graph.graph import build_graph
+
         _graph = build_graph(get_memory())
     return _graph
 
@@ -94,12 +97,116 @@ def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
     results: list[FactCheckOutput] = []
     for i in range(len(output.claims)):
         fc_input = _claim_to_input(output, i, image_caption, image_url)
-        state = graph.invoke({"input": fc_input})
+        lf = get_langfuse_handler()
+        state = graph.invoke({"input": fc_input}, config={"callbacks": [lf]} if lf else {})
         fc_output: Optional[FactCheckOutput] = state.get("output")
         if fc_output:
             results.append(fc_output)
         else:
             logger.error("Graph returned no output for claim %s", fc_input.claim_id)
+
+    return results
+
+
+def run_fact_check_by_claim_ids(claim_ids: list[str]) -> list[FactCheckOutput]:
+    """Fact-check claims that are already ingested in the DB.
+
+    For each claim_id this:
+      1. Loads claim_text + metadata from ChromaDB (`get_claims_by_ids`)
+      2. Loads entities from Neo4j (`get_entity_context`)
+      3. Loads the parent Article URL from Neo4j (`get_article_url_by_id`)
+      4. Loads the article's caption + image (if any)
+      5. Builds a FactCheckInput with real (DB-backed) IDs and invokes the graph
+
+    Use this when the caller already has claim_ids from `decompose_input(query)`
+    (cache-hit path) and does NOT have the original PreprocessingOutput in scope.
+    For the cold path where you DO have the output, prefer `run_fact_check(output)`.
+    """
+    memory = get_memory()
+    graph = _get_graph()
+
+    if not claim_ids:
+        return []
+
+    claims_result = memory.get_claims_by_ids(claim_ids)
+    docs = claims_result.get("documents") or []
+    metas = claims_result.get("metadatas") or []
+    ids = claims_result.get("ids") or []
+
+    # Map id → (text, meta) for stable iteration order matching `claim_ids` arg
+    by_id = {cid: (docs[i], metas[i]) for i, cid in enumerate(ids)}
+
+    results: list[FactCheckOutput] = []
+    for claim_id in claim_ids:
+        record = by_id.get(claim_id)
+        if record is None:
+            logger.error("run_fact_check_by_claim_ids: claim_id not in DB: %s", claim_id)
+            continue
+        claim_text, meta = record
+        meta = meta or {}
+        article_id = meta.get("article_id", "")
+        topic_text = meta.get("topic_text", "") or ""
+        extracted_at_iso = meta.get("extracted_at", "")
+
+        # Entities
+        entity_rows = memory.get_entity_context(claim_id) or []
+        entity_refs = [
+            EntityRef(
+                entity_id=e.get("entity_id", ""),
+                name=e.get("name", ""),
+                entity_type=e.get("entity_type", "") or "unknown",
+                sentiment=e.get("sentiment", "neutral") or "neutral",
+            )
+            for e in entity_rows
+            if e.get("entity_id")
+        ]
+
+        # Source URL (article-level)
+        source_url = ""
+        if article_id:
+            source_url = memory.get_article_url_by_id(article_id) or ""
+
+        # Image caption (article-level)
+        image_caption: Optional[str] = None
+        image_url: Optional[str] = None
+        if article_id:
+            caption_result = memory.get_caption_by_article(article_id) or {}
+            cap_docs = caption_result.get("documents") or []
+            cap_metas = caption_result.get("metadatas") or []
+            if cap_docs:
+                image_caption = cap_docs[0]
+            if cap_metas:
+                image_url = (cap_metas[0] or {}).get("image_url")
+
+        # Timestamp
+        try:
+            timestamp = (
+                datetime.fromisoformat(extracted_at_iso)
+                if extracted_at_iso
+                else datetime.now(timezone.utc)
+            )
+        except ValueError:
+            timestamp = datetime.now(timezone.utc)
+
+        fc_input = FactCheckInput(
+            claim_id=claim_id,
+            claim_text=claim_text,
+            entities=entity_refs,
+            source_url=source_url or "https://unknown.source",
+            article_id=article_id or make_id("art_"),
+            image_caption=image_caption,
+            image_url=image_url,
+            timestamp=timestamp,
+            topic_text=topic_text,
+        )
+
+        lf = get_langfuse_handler()
+        state = graph.invoke({"input": fc_input}, config={"callbacks": [lf]} if lf else {})
+        fc_output: Optional[FactCheckOutput] = state.get("output")
+        if fc_output:
+            results.append(fc_output)
+        else:
+            logger.error("Graph returned no output for claim %s", claim_id)
 
     return results
 
@@ -110,11 +217,13 @@ def fact_check_claim(
     image_url: Optional[str] = None,
     image_caption: Optional[str] = None,
 ) -> FactCheckOutput:
-    """Convenience wrapper: fact-check a single raw text claim.
+    """Synthetic single-claim shortcut — used by `evaluation/evaluation.py` for
+    benchmark runs on raw claim text (no DB ingest needed).
 
-    Creates a synthetic FactCheckInput (no article, no entities) and runs the graph.
-    Used by the Streamlit frontend for direct user queries.
-    Pass image_url (and optionally image_caption) to enable cross-modal checking.
+    The Streamlit frontend no longer uses this path; user-typed queries now
+    flow through `decompose_input` + `run_fact_check_by_claim_ids` so the DB
+    is properly populated. Keep this function only for benchmark scripts that
+    need a stateless, fast call on a list of raw claim strings.
     """
     graph = _get_graph()
     fc_input = FactCheckInput(

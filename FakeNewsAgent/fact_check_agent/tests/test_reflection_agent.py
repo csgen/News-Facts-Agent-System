@@ -1,48 +1,49 @@
-"""Tests for the Reflection Agent — no ChromaDB or OpenAI API keys required.
+"""Tests for the Reflection Agent — no Neo4j or OpenAI API keys required.
 
 Covers:
   - source_id_from_url: URL → source_id derivation
-  - credibility_signal: verdict + confidence → [0,1] credibility observation
-  - query_source_credibility: k-NN weighted aggregation (credibility_mean)
-  - update_source_credibility: delegates correctly to MemoryAgent
+  - credibility_signal: verdict + confidence → [0,1] observation
+  - query_source_credibility: Neo4j exact lookup with base_credibility fallback
+  - record_verdict_outcome: all 5 write-backs delegated correctly
 """
+
 from unittest.mock import MagicMock, call, patch
 
 from fact_check_agent.src.agents.reflection_agent import (
-    _MIN_SAMPLES,
+    _ALPHA,
+    _DEFAULT_CREDIBILITY,
     credibility_signal,
     query_source_credibility,
+    record_verdict_outcome,
     source_id_from_url,
-    update_source_credibility,
 )
 
 # ── source_id_from_url ────────────────────────────────────────────────────────
+
 
 def test_source_id_from_standard_url():
     assert source_id_from_url("https://bbc.co.uk/news/1") == "src_bbc_co_uk"
 
 
 def test_source_id_from_url_strips_path():
-    """Only the domain should be in the ID — not the path."""
     sid = source_id_from_url("https://reuters.com/article/long/path?q=1")
     assert sid == "src_reuters_com"
     assert "/article" not in sid
 
 
 def test_source_id_from_url_replaces_dots():
-    """Dots in the domain are replaced with underscores."""
     sid = source_id_from_url("https://apnews.com/article/1")
     assert "." not in sid.replace("src_", "")
 
 
 def test_source_id_same_for_same_domain():
-    """Two different URLs from the same domain must produce the same source_id."""
     a = source_id_from_url("https://bbc.co.uk/news/1")
     b = source_id_from_url("https://bbc.co.uk/news/2")
     assert a == b
 
 
 # ── credibility_signal ────────────────────────────────────────────────────────
+
 
 def test_credibility_signal_supported_high_confidence():
     assert credibility_signal("supported", 90) == 0.90
@@ -53,177 +54,197 @@ def test_credibility_signal_supported_low_confidence():
 
 
 def test_credibility_signal_refuted_high_confidence():
-    """Refuted with 90% confidence → source was dishonest → credibility = 0.10."""
     assert abs(credibility_signal("refuted", 90) - 0.10) < 1e-9
 
 
 def test_credibility_signal_refuted_low_confidence():
-    """Refuted with 30% confidence → ambiguous → credibility = 0.70."""
     assert abs(credibility_signal("refuted", 30) - 0.70) < 1e-9
 
 
 def test_credibility_signal_misleading_is_neutral():
-    """Misleading verdict always returns the neutral 0.5 regardless of confidence."""
-    assert credibility_signal("misleading", 0)   == 0.5
+    assert credibility_signal("misleading", 0) == 0.5
     assert credibility_signal("misleading", 100) == 0.5
-    assert credibility_signal("misleading", 55)  == 0.5
+    assert credibility_signal("misleading", 55) == 0.5
 
 
 def test_credibility_signal_boundary_values():
-    """confidence_score=0 and confidence_score=100 must not produce out-of-range values."""
-    assert 0.0 <= credibility_signal("supported", 0)   <= 1.0
+    assert 0.0 <= credibility_signal("supported", 0) <= 1.0
     assert 0.0 <= credibility_signal("supported", 100) <= 1.0
-    assert 0.0 <= credibility_signal("refuted",   0)   <= 1.0
-    assert 0.0 <= credibility_signal("refuted",   100) <= 1.0
+    assert 0.0 <= credibility_signal("refuted", 0) <= 1.0
+    assert 0.0 <= credibility_signal("refuted", 100) <= 1.0
 
 
 # ── query_source_credibility ──────────────────────────────────────────────────
 
-def make_chroma_results(distances, credibilities):
-    """Build a ChromaDB-style query result dict."""
-    metadatas = [
-        {"credibility": c, "source_id": "src_test_com",
-         "topic_text": "test", "verdict_label": "supported",
-         "verdict_id": f"vrd_{i}", "created_at": "2024-01-01T00:00:00+00:00"}
-        for i, c in enumerate(credibilities)
-    ]
-    return {"distances": [distances], "metadatas": [metadatas]}
 
-
-def test_query_returns_weighted_mean():
-    """credibility_mean must be the distance-weighted average of observations."""
+def test_query_returns_neo4j_value():
+    """When a Neo4j record exists, return it as credibility_mean."""
     memory = MagicMock()
-    # Two equal-distance observations: credibility 1.0 and 0.0 → mean should be 0.5
-    memory.query_source_credibility.return_value = make_chroma_results(
-        distances=[0.1, 0.1],
-        credibilities=[1.0, 0.0],
-    )
+    memory.get_source_topic_credibility.return_value = 0.78
 
-    result = query_source_credibility("any claim", "https://test.com", memory)
+    result = query_source_credibility("any claim", "https://bbc.co.uk", memory, topic="health")
 
-    assert abs(result["credibility_mean"] - 0.5) < 1e-3
-    assert result["sample_count"] == 2
+    assert abs(result["credibility_mean"] - 0.78) < 1e-4
+    assert result["sample_count"] == 1
 
 
-def test_query_closer_neighbour_weighted_more():
-    """Observation at distance 0.1 should dominate over one at distance 0.9."""
+def test_query_falls_back_to_base_credibility():
+    """When no dynamic record exists, fall back to Source.base_credibility."""
     memory = MagicMock()
-    memory.query_source_credibility.return_value = make_chroma_results(
-        distances=[0.1, 0.9],
-        credibilities=[1.0, 0.0],  # close = high credibility, far = low
-    )
+    memory.get_source_topic_credibility.return_value = None
+    memory.get_base_credibility.return_value = 0.72
 
-    result = query_source_credibility("any claim", "https://test.com", memory)
+    result = query_source_credibility("any claim", "https://bbc.co.uk", memory, topic="health")
 
-    # Closer neighbour dominates — mean should be above 0.5
-    assert result["credibility_mean"] > 0.5
+    assert abs(result["credibility_mean"] - 0.72) < 1e-4
+    assert result["sample_count"] == 1
 
 
-def test_query_insufficient_samples_returns_none_stats():
-    """Fewer than _MIN_SAMPLES observations → credibility_mean is None."""
+def test_query_returns_none_when_no_record_and_no_base():
+    """Unknown source with no dynamic record → credibility_mean is None."""
     memory = MagicMock()
-    memory.query_source_credibility.return_value = make_chroma_results(
-        distances=[0.1],
-        credibilities=[0.9],
-    )
+    memory.get_source_topic_credibility.return_value = None
+    memory.get_base_credibility.return_value = None
 
-    result = query_source_credibility("any claim", "https://test.com", memory, k=20)
+    result = query_source_credibility("any claim", "https://unknown.xyz", memory, topic="health")
 
     assert result["credibility_mean"] is None
-    assert result["sample_count"]     == 1
+    assert result["sample_count"] == 0
 
 
-def test_query_empty_results_returns_none_stats():
-    """Zero observations → credibility_mean is None, sample_count = 0."""
+def test_query_returns_none_when_topic_empty():
+    """No topic → skip lookup entirely."""
     memory = MagicMock()
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
 
-    result = query_source_credibility("any claim", "https://test.com", memory)
+    result = query_source_credibility("any claim", "https://bbc.co.uk", memory, topic="")
 
     assert result["credibility_mean"] is None
-    assert result["sample_count"]     == 0
-
-
-def test_query_memory_failure_returns_none_stats():
-    """If MemoryAgent raises, degrade gracefully — don't crash the pipeline."""
-    memory = MagicMock()
-    memory.query_source_credibility.side_effect = Exception("ChromaDB unavailable")
-
-    result = query_source_credibility("any claim", "https://test.com", memory)
-
-    assert result["credibility_mean"] is None
-    assert result["sample_count"]     == 0
+    assert result["sample_count"] == 0
+    memory.get_source_topic_credibility.assert_not_called()
 
 
 def test_query_uses_correct_source_id():
-    """The source_id passed to MemoryAgent must match source_id_from_url output."""
     memory = MagicMock()
-    memory.query_source_credibility.return_value = {"distances": [[]], "metadatas": [[]]}
+    memory.get_source_topic_credibility.return_value = 0.7
 
-    query_source_credibility("any claim", "https://bbc.co.uk/news/1", memory)
+    query_source_credibility("any claim", "https://bbc.co.uk/news/1", memory, topic="health")
 
-    _call_kwargs = memory.query_source_credibility.call_args
-    assert _call_kwargs.kwargs["source_id"] == "src_bbc_co_uk"
+    memory.get_source_topic_credibility.assert_called_once_with("src_bbc_co_uk", "health")
 
 
-# ── update_source_credibility ─────────────────────────────────────────────────
-
-def test_update_calls_memory_add():
-    """update_source_credibility must call memory.add_source_credibility_point once."""
+def test_query_failure_returns_none_stats():
     memory = MagicMock()
-    memory.add_source_credibility_point.return_value = None
+    memory.get_source_topic_credibility.side_effect = Exception("Neo4j unavailable")
 
-    update_source_credibility(
-        claim_text      = "Test claim.",
-        source_url      = "https://example.com/article",
-        verdict_id      = "vrd_abc123",
-        verdict_label   = "supported",
-        confidence_score= 80,
-        memory          = memory,
-    )
+    result = query_source_credibility("any claim", "https://test.com", memory, topic="health")
 
-    memory.add_source_credibility_point.assert_called_once()
+    assert result["credibility_mean"] is None
+    assert result["sample_count"] == 0
 
 
-def test_update_point_id_format():
-    """point_id must be 'sc_{verdict_id}' to prevent collision with other collections."""
+# ── record_verdict_outcome ────────────────────────────────────────────────────
+
+
+def _make_output(verdict="supported", confidence=80):
+    output = MagicMock()
+    output.verdict_id = "vrd_test123"
+    output.claim_id = "clm_test456"
+    output.verdict = verdict
+    output.confidence_score = confidence
+    output.reasoning = "Test reasoning."
+    output.evidence_links = []
+    output.cross_modal_flag = False
+    return output
+
+
+def test_record_calls_update_claim_status():
     memory = MagicMock()
-    memory.add_source_credibility_point.return_value = None
+    memory.get_source_topic_credibility.return_value = 0.65
 
-    update_source_credibility(
-        claim_text="Claim.", source_url="https://example.com",
-        verdict_id="vrd_xyz789", verdict_label="refuted",
-        confidence_score=70, memory=memory,
-    )
+    with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
+        record_verdict_outcome(_make_output(), "claim", "https://x.com", "health", memory)
 
-    call_kwargs = memory.add_source_credibility_point.call_args.kwargs
-    assert call_kwargs["point_id"] == "sc_vrd_xyz789"
+    memory.update_claim_status.assert_called_once_with("clm_test456", "verified")
 
 
-def test_update_credibility_signal_applied():
-    """credibility written to memory must use credibility_signal() — not raw confidence."""
+def test_record_calls_add_verdict():
     memory = MagicMock()
-    memory.add_source_credibility_point.return_value = None
+    memory.get_source_topic_credibility.return_value = 0.65
 
-    update_source_credibility(
-        claim_text="Claim.", source_url="https://example.com",
-        verdict_id="vrd_1", verdict_label="refuted",
-        confidence_score=80, memory=memory,
-    )
+    with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
+        record_verdict_outcome(_make_output(), "claim", "https://x.com", "health", memory)
 
-    call_kwargs = memory.add_source_credibility_point.call_args.kwargs
-    # refuted with 80 confidence → credibility = 1 - 0.80 = 0.20
-    assert abs(call_kwargs["credibility"] - 0.20) < 1e-9
+    memory.add_verdict.assert_called_once()
 
 
-def test_update_memory_failure_does_not_raise():
-    """If MemoryAgent raises, update_source_credibility must not propagate the exception."""
+def test_record_alpha_update_supported():
+    """supported @80% → signal=0.80; new_c = old_c + 0.05*(0.80-0.5)."""
     memory = MagicMock()
-    memory.add_source_credibility_point.side_effect = Exception("write failed")
+    old_c = 0.65
+    memory.get_source_topic_credibility.return_value = old_c
+    expected = round(old_c + _ALPHA * (0.80 - 0.5), 6)
 
-    # Should not raise
-    update_source_credibility(
-        claim_text="Claim.", source_url="https://example.com",
-        verdict_id="vrd_1", verdict_label="supported",
-        confidence_score=80, memory=memory,
-    )
+    with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
+        record_verdict_outcome(
+            _make_output("supported", 80), "claim", "https://x.com", "health", memory
+        )
+
+    call_args = memory.upsert_source_topic_credibility.call_args
+    assert call_args is not None
+    _, _, written_c = call_args.args
+    assert abs(written_c - expected) < 1e-6
+
+
+def test_record_alpha_update_uses_base_when_no_dynamic():
+    """First verdict for this source/topic: initialise from base_credibility."""
+    memory = MagicMock()
+    memory.get_source_topic_credibility.return_value = None
+    memory.get_base_credibility.return_value = 0.70
+
+    with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
+        record_verdict_outcome(
+            _make_output("supported", 80), "claim", "https://x.com", "health", memory
+        )
+
+    memory.upsert_source_topic_credibility.assert_called_once()
+
+
+def test_record_alpha_update_uses_default_when_no_source():
+    """Unknown source + no dynamic record → initialise from _DEFAULT_CREDIBILITY."""
+    memory = MagicMock()
+    memory.get_source_topic_credibility.return_value = None
+    memory.get_base_credibility.return_value = None
+
+    with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
+        record_verdict_outcome(
+            _make_output("supported", 80), "claim", "https://unknown.xyz", "health", memory
+        )
+
+    call_args = memory.upsert_source_topic_credibility.call_args
+    _, _, written_c = call_args.args
+    expected = round(_DEFAULT_CREDIBILITY + _ALPHA * (0.80 - 0.5), 6)
+    assert abs(written_c - expected) < 1e-6
+
+
+def test_record_memory_failure_does_not_raise():
+    """Any individual write failure must not propagate."""
+    memory = MagicMock()
+    memory.update_claim_status.side_effect = Exception("DB down")
+    memory.add_verdict.side_effect = Exception("DB down")
+    memory.get_source_topic_credibility.side_effect = Exception("DB down")
+
+    with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
+        record_verdict_outcome(_make_output(), "claim", "https://x.com", "health", memory)
+
+
+def test_record_unknown_topic_when_empty():
+    """Empty topic_text falls back to 'unknown' bucket."""
+    memory = MagicMock()
+    memory.get_source_topic_credibility.return_value = 0.65
+
+    with patch("fact_check_agent.src.agents.reflection_agent.Verdict"):
+        record_verdict_outcome(_make_output(), "claim", "https://x.com", "", memory)
+
+    call_args = memory.upsert_source_topic_credibility.call_args
+    _, topic, _ = call_args.args
+    assert topic == "unknown"

@@ -298,8 +298,9 @@ class MemoryAgent:
     # ── Query Methods ───────────────────────────────────────────────────
 
     def update_claim_status(self, claim_id: str, status: str) -> None:
-        """Update the status of an existing claim (e.g. 'pending' → 'verified')."""
+        """Update claim status in both ChromaDB and Neo4j."""
         self._vector.update_claim_status(claim_id, status)
+        self._graph.update_claim_status(claim_id, status)
 
     def search_similar_claims(
         self, text: str, top_k: int = 5
@@ -328,6 +329,10 @@ class MemoryAgent:
 
     def get_caption_by_article(self, article_id: str) -> dict:
         return self._vector.get_caption_by_article(article_id)
+
+    def get_article_url_by_id(self, article_id: str) -> Optional[str]:
+        """Return the URL stored on the Article node (None if missing)."""
+        return self._graph.get_article_url_by_id(article_id)
 
     def get_verdict_by_claim(self, claim_id: str) -> dict:
         return self._vector.get_verdict_by_claim(claim_id)
@@ -531,35 +536,23 @@ class MemoryAgent:
             logger.warning("Human verdict lookup failed: %s", e)
             return None
 
-    # ── Reflection Agent read/write (Task 2) ───────────────────────────
+    # ── Reflection Agent read/write ─────────────────────────────────────
 
-    def add_source_credibility_point(
-        self,
-        point_id: str,
-        claim_text: str,
-        topic_text: str,
-        source_id: str,
-        credibility: float,
-        verdict_label: str,
-        verdict_id: str,
-        created_at: str,
+    def get_base_credibility(self, source_id: str) -> Optional[float]:
+        """Return static base_credibility for a Source node, or None if unknown."""
+        return self._graph.get_base_credibility(source_id)
+
+    def get_topic_for_verdict(self, verdict_id: str) -> str:
+        """Return the topic_text of the Claim linked to this Verdict, or '' if not found."""
+        return self._graph.get_topic_for_verdict(verdict_id)
+
+    def get_source_topic_credibility(self, source_id: str, topic: str) -> Optional[float]:
+        """Return current dynamic credibility for (source, topic), or None if no record."""
+        return self._graph.get_source_topic_credibility(source_id, topic)
+
+    def upsert_source_topic_credibility(
+        self, source_id: str, topic: str, credibility: float
     ) -> None:
-        """Append one (source, topic, credibility) observation."""
-        embedding = self._embeddings.embed(topic_text)
-        self._vector.upsert_source_credibility_point(
-            point_id=point_id,
-            embedding=embedding,
-            document=topic_text,
-            source_id=source_id,
-            credibility=credibility,
-            verdict_label=verdict_label,
-            verdict_id=verdict_id,
-            created_at=created_at,
-        )
+        """Write (or update) the HAS_CREDIBILITY relationship in Neo4j."""
+        self._graph.upsert_source_topic_credibility(source_id, topic, credibility)
 
-    def query_source_credibility(
-        self, claim_text: str, source_id: str, k: int = 20
-    ) -> dict:
-        """Retrieve k nearest (source, topic) credibility observations."""
-        embedding = self._embeddings.embed(claim_text)
-        return self._vector.query_source_credibility(embedding, source_id=source_id, k=k)

@@ -4,6 +4,7 @@ This is a tool, not an agent: it makes direct database calls (ChromaDB vector
 search + ChromaDB verdict lookup) and returns structured results. No LLM call,
 no loops, no planning.
 """
+
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -26,20 +27,20 @@ def retrieve_similar_claims(claim_text: str, memory: "MemoryAgent", top_k: int =
         logger.debug("No similar claims found in memory for query: %s", claim_text[:60])
         return []
 
-    ids       = raw["ids"][0]
-    docs      = raw["documents"][0]
+    ids = raw["ids"][0]
+    docs = raw["documents"][0]
     distances = raw["distances"][0]
 
     results = []
     for i, claim_id in enumerate(ids):
-        verdict_label      = None
+        verdict_label = None
         verdict_confidence = None
-        verified_at        = None
+        verified_at = None
 
         verdict_raw = memory.get_verdict_by_claim(claim_id)
         if verdict_raw.get("metadatas") and verdict_raw["metadatas"]:
             meta = verdict_raw["metadatas"][0]
-            verdict_label      = meta.get("label")
+            verdict_label = meta.get("label")
             verdict_confidence = meta.get("confidence")
             raw_ts = meta.get("verified_at")
             if raw_ts:
@@ -50,14 +51,18 @@ def retrieve_similar_claims(claim_text: str, memory: "MemoryAgent", top_k: int =
                 except (ValueError, TypeError):
                     verified_at = None
 
-        results.append({
-            "claim_id":           claim_id,
-            "claim_text":         docs[i],
-            "verdict_label":      verdict_label,
-            "verdict_confidence": float(verdict_confidence) if verdict_confidence is not None else None,
-            "distance":           float(distances[i]),
-            "verified_at":        verified_at,
-        })
+        results.append(
+            {
+                "claim_id": claim_id,
+                "claim_text": docs[i],
+                "verdict_label": verdict_label,
+                "verdict_confidence": float(verdict_confidence)
+                if verdict_confidence is not None
+                else None,
+                "distance": float(distances[i]),
+                "verified_at": verified_at,
+            }
+        )
 
     logger.debug("RAG tool retrieved %d similar claims", len(results))
     return results

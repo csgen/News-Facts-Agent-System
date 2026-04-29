@@ -7,6 +7,7 @@ No LLM call, no planning.
 Tuning surface:
   - _MIN_DISTINCT_DOMAINS: minimum number of distinct source domains required
 """
+
 import logging
 
 from tavily import TavilyClient
@@ -29,9 +30,7 @@ def search_live(claim_text: str, api_key: str, max_results: int = 5) -> list[dic
     distinct_domains = _count_distinct_domains(results)
     if distinct_domains < _MIN_DISTINCT_DOMAINS:
         broader_query = f"fact check: {claim_text}"
-        logger.debug(
-            "Only %d distinct domains — retrying with broader query", distinct_domains
-        )
+        logger.debug("Only %d distinct domains — retrying with broader query", distinct_domains)
         results = _run_search(client, broader_query, max_results + 3)
 
     logger.info("Live search tool returned %d results for claim: %s", len(results), claim_text[:60])
@@ -74,10 +73,10 @@ def format_search_context(results: list[dict]) -> tuple[str, list[str]]:
     evidence_links: list[str] = []
 
     for r in results:
-        url     = r.get("url", "")
-        title   = r.get("title", "Untitled")
+        url = r.get("url", "")
+        title = r.get("title", "Untitled")
         content = (r.get("content") or r.get("snippet") or "")[:300]
-        score   = r.get("score")
+        score = r.get("score")
 
         score_str = f" (relevance: {score:.2f})" if score else ""
         lines.append(f"- [{title}]({url}){score_str}: {content}")

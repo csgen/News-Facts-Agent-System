@@ -11,13 +11,16 @@ Usage:
     memory  = get_memory()
     outputs = run_fact_check(preprocessing_output)
 """
+
 import logging
 from typing import Optional
 
+from langfuse.decorators import observe
 from src._bootstrap import *  # noqa: F401,F403
 from src.models.pipeline import PreprocessingOutput  # memory_agent model
 
 from fact_check_agent.src.graph.graph import build_graph
+from fact_check_agent.src.llm_factory import get_langfuse_handler
 from fact_check_agent.src.memory_client import get_memory
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
 
@@ -50,25 +53,26 @@ def claim_to_fact_check_input(
     """
     claim = output.claims[claim_index]
     return FactCheckInput(
-        claim_id      = claim.claim_id,
-        claim_text    = claim.claim_text,
-        entities      = [
+        claim_id=claim.claim_id,
+        claim_text=claim.claim_text,
+        entities=[
             EntityRef(
-                entity_id   = e.entity_id,
-                name        = e.name,
-                entity_type = e.entity_type,
-                sentiment   = e.sentiment,
+                entity_id=e.entity_id,
+                name=e.name,
+                entity_type=e.entity_type,
+                sentiment=e.sentiment,
             )
             for e in claim.entities
         ],
-        source_url    = output.article.url,
-        article_id    = claim.article_id,
-        image_caption = image_caption,
-        image_url     = image_url,
-        timestamp     = claim.extracted_at,
+        source_url=output.article.url,
+        article_id=claim.article_id,
+        image_caption=image_caption,
+        image_url=image_url,
+        timestamp=claim.extracted_at,
     )
 
 
+@observe(name="fact_check_pipeline")
 def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
     """Run the fact-check graph on every claim in a PreprocessingOutput.
 
@@ -78,7 +82,7 @@ def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
     Returns one FactCheckOutput per claim in output.claims.
     """
     memory = get_memory()
-    graph  = _get_graph()
+    graph = _get_graph()
 
     # Pre-fetch image caption once for the article (both text and URL)
     caption_result = memory.get_caption_by_article(output.article.article_id)
@@ -99,16 +103,26 @@ def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
         queries_to_run = base_input.queries or [base_input.claim_text]
 
         for j, query_text in enumerate(queries_to_run):
-            fact_check_input = base_input.model_copy(update={
-                "claim_text": query_text,
-                "claim_id":   f"{base_input.claim_id}_q{j}" if base_input.queries else base_input.claim_id,
-                "queries":    [],   # graph always receives a single claim
-            })
+            fact_check_input = base_input.model_copy(
+                update={
+                    "claim_text": query_text,
+                    "claim_id": f"{base_input.claim_id}_q{j}"
+                    if base_input.queries
+                    else base_input.claim_id,
+                    "queries": [],  # graph always receives a single claim
+                }
+            )
             logger.info(
                 "Fact-check claim %d/%d query %d/%d: %s",
-                i + 1, len(output.claims), j + 1, len(queries_to_run), fact_check_input.claim_id,
+                i + 1,
+                len(output.claims),
+                j + 1,
+                len(queries_to_run),
+                fact_check_input.claim_id,
             )
-            state = graph.invoke({"input": fact_check_input})
+            lf_handler = get_langfuse_handler()
+            invoke_cfg = {"callbacks": [lf_handler]} if lf_handler else {}
+            state = graph.invoke({"input": fact_check_input}, config=invoke_cfg)
             fc_output: Optional[FactCheckOutput] = state.get("output")
 
             if fc_output:
