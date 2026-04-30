@@ -1,0 +1,19 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana — declarative dashboard provider.
+# Tells Grafana to pick up any *.json dashboard files from the same directory
+# at startup, so they appear under "Dashboards → news_facts_system" with no
+# manual import step.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: 1
+
+providers:
+  - name: news_facts_system
+    orgId: 1
+    folder: news_facts_system
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

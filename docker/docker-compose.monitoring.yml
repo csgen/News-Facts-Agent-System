@@ -1,0 +1,108 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# news_facts_system — monitoring stack overlay.
+#
+# Pulls in five services, all gated behind `profiles: ["monitoring"]`:
+#   prometheus         — TSDB + scraper, port 9090
+#   grafana            — dashboards, port 3001 (avoids clashing with Langfuse on 3000)
+#   cadvisor           — per-container metrics, port 8080
+#   node-exporter      — host-level metrics, port 9100
+#   metrics-collector  — custom sidecar, polls Neo4j + Chroma → exposes /metrics
+#
+# Activate with --profile monitoring, e.g.:
+#   docker compose -f docker/docker-compose.yml \
+#                  -f docker/docker-compose.monitoring.yml \
+#                  --profile monitoring up -d ui
+#
+# Combinable with docker-compose.local.yml when teammates want local DBs +
+# monitoring at the same time:
+#   docker compose -f docker/docker-compose.yml \
+#                  -f docker/docker-compose.local.yml \
+#                  -f docker/docker-compose.monitoring.yml \
+#                  --profile neo4j --profile chroma --profile monitoring up -d ui
+#
+# Persisted state (NOT removed by `docker compose down`):
+#   docker/data/prometheus/   — TSDB (30-day retention)
+#   docker/data/grafana/      — dashboards, users, plugin installs
+# Both directories are gitignored at the repo root.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nfs-prometheus
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data/prometheus:/prometheus
+    networks:
+      - news_facts_net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nfs-grafana
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "3001:3000"   # 3001 on host avoids clashing with Langfuse (3000)
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # No plugins installed by default — keeps boot fast and avoids registry-pull
+      # failures. To add a Neo4j datasource later (for explicit ScrapeRun panels)
+      # the recommended path is the Infinity datasource + a small JSON endpoint
+      # on metrics-collector. See README "Future: ScrapeRun panels" note.
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./data/grafana:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - news_facts_net
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: nfs-cadvisor
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - news_facts_net
+    privileged: true     # required on some hosts for full container metrics
+
+  # Custom sidecar: polls Neo4j + Chroma every 5 min and exposes /metrics on 8001.
+  # Re-uses the unified news_facts_system image so it has MemoryAgent available.
+  metrics-collector:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: news_facts_system:latest
+    container_name: nfs-metrics-collector
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    working_dir: /app/scraper_preprocessing_memory
+    command: ["python", "scripts/metrics_collector.py"]
+    env_file: ../.env
+    volumes:
+      - ..:/app
+    networks:
+      - news_facts_net
+
+networks:
+  news_facts_net:
+    driver: bridge

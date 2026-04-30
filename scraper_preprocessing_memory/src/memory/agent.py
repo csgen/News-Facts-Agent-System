@@ -295,6 +295,36 @@ class MemoryAgent:
         """Resolve an expired prediction."""
         self._graph.resolve_prediction(prediction_id, outcome)
 
+    def add_scrape_run(
+        self,
+        run_id: str,
+        started_at: datetime,
+        finished_at: datetime,
+        duration_s: float,
+        scraped: int,
+        ingested: int,
+        skipped: int,
+        failed: int,
+        source: str,
+    ) -> None:
+        """Record a one-line summary of a pipeline run.
+
+        Used by Grafana to render the Scheduled-Scrapes panels — single source
+        of truth for both local and GitHub-Actions cron runs (the same
+        pipeline.py code path executes in both contexts).
+        """
+        self._graph.create_scrape_run(
+            run_id=run_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_s=duration_s,
+            scraped=scraped,
+            ingested=ingested,
+            skipped=skipped,
+            failed=failed,
+            source=source,
+        )
+
     # ── Query Methods ───────────────────────────────────────────────────
 
     def update_claim_status(self, claim_id: str, status: str) -> None:

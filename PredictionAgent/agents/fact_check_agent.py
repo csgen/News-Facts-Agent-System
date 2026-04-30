@@ -39,6 +39,45 @@ from src.models.pipeline import PreprocessingOutput
 
 from agents.memory_agent import get_memory
 
+# ── Prometheus instrumentation ──────────────────────────────────────────────
+# These metrics are exposed by frontend/app.py via prometheus_client.start_http_server.
+# Defined here at module level so they're registered exactly once when the
+# UI process imports this module.
+try:
+    from prometheus_client import Counter, Histogram
+    _VERDICTS_TOTAL  = Counter(
+        "nfs_factcheck_verdicts_total",
+        "Verdicts produced by the fact-check pipeline (per UI/run-by-claim-id call)",
+        ["label"],
+    )
+    _LLM_ERRORS      = Counter(
+        "nfs_llm_api_errors_total",
+        "Exceptions raised during a fact-check graph invocation",
+        ["provider"],
+    )
+    _FACTCHECK_LATCY = Histogram(
+        "nfs_factcheck_latency_seconds",
+        "Wall-clock seconds for a single graph.invoke (one claim)",
+    )
+    _METRICS_OK = True
+except ImportError:
+    # prometheus_client not installed (e.g. in a stripped-down test env).
+    # Stub no-ops so business logic stays unaffected.
+    _METRICS_OK = False
+    class _Noop:
+        def labels(self, *a, **kw): return self
+        def inc(self, *a, **kw):    pass
+        def observe(self, *a, **kw): pass
+        def time(self):
+            class _Cm:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+            return _Cm()
+    _VERDICTS_TOTAL = _Noop()
+    _LLM_ERRORS     = _Noop()
+    _FACTCHECK_LATCY = _Noop()
+
+
 logger = logging.getLogger(__name__)
 
 _graph = None
@@ -201,9 +240,19 @@ def run_fact_check_by_claim_ids(claim_ids: list[str]) -> list[FactCheckOutput]:
         )
 
         lf = get_langfuse_handler()
-        state = graph.invoke({"input": fc_input}, config={"callbacks": [lf]} if lf else {})
+        try:
+            with _FACTCHECK_LATCY.time():
+                state = graph.invoke(
+                    {"input": fc_input},
+                    config={"callbacks": [lf]} if lf else {},
+                )
+        except Exception as _e:
+            _LLM_ERRORS.labels(provider="openai").inc()
+            logger.exception("graph.invoke failed for claim %s", claim_id)
+            continue
         fc_output: Optional[FactCheckOutput] = state.get("output")
         if fc_output:
+            _VERDICTS_TOTAL.labels(label=str(fc_output.verdict)).inc()
             results.append(fc_output)
         else:
             logger.error("Graph returned no output for claim %s", claim_id)
@@ -236,7 +285,13 @@ def fact_check_claim(
         image_url=image_url or None,
         timestamp=datetime.now(timezone.utc),
     )
-    state = graph.invoke({"input": fc_input})
+    try:
+        with _FACTCHECK_LATCY.time():
+            state = graph.invoke({"input": fc_input})
+    except Exception:
+        _LLM_ERRORS.labels(provider="openai").inc()
+        logger.exception("graph.invoke failed for synthetic claim")
+        state = {}
     fc_output: Optional[FactCheckOutput] = state.get("output")
     if fc_output is None:
         logger.error("Graph returned no output for synthetic claim")
@@ -248,4 +303,5 @@ def fact_check_claim(
             evidence_links=[],
             reasoning="Pipeline error — no output produced.",
         )
+    _VERDICTS_TOTAL.labels(label=str(fc_output.verdict)).inc()
     return fc_output

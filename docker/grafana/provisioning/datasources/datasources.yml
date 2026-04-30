@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana — declarative datasource provisioning.
+# Loaded automatically on container startup from /etc/grafana/provisioning/.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: 1
+
+datasources:
+
+  # Default datasource: live application + infrastructure metrics.
+  # uid is pinned to "prometheus" so the provisioned dashboard's panels
+  # (which hard-code datasource.uid="prometheus") can resolve it. Without
+  # an explicit uid, Grafana auto-generates a random one and the panels
+  # render "datasource not found".
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+
+  # A Neo4j datasource was originally provisioned here for the "Scheduled
+  # scrapes" panels (ScrapeRun history). Removed because no first-party Neo4j
+  # plugin exists in the Grafana registry and the previous name was wrong.
+  # If you want explicit per-run history later, the standard pattern is:
+  #   1) Add a small REST endpoint to scripts/metrics_collector.py that
+  #      returns ScrapeRun records as JSON.
+  #   2) Install the `yesoreyeram-infinity-datasource` plugin
+  #      (GF_INSTALL_PLUGINS in docker-compose.monitoring.yml).
+  #   3) Re-add a datasource block here pointing at the metrics-collector URL,
+  #      and re-add the ScrapeRun panels in the dashboard JSON.

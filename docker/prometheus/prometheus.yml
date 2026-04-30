@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Prometheus scrape config for news_facts_system.
+#
+# Three scrape jobs:
+#   ui                — counters/histogram from PredictionAgent's Streamlit process
+#   metrics-collector — DB-size gauges (Neo4j + Chroma), polled at 5 min cadence
+#   cadvisor          — per-container metrics (CPU/RAM/network/disk per service)
+#
+# The scraper container itself has NO /metrics port and is intentionally absent
+# here — it's a one-shot, ephemeral process. Its outcomes flow into the
+# dashboard via the (:ScrapeRun) Neo4j node it writes at end of run, which
+# Grafana reads via the Neo4j datasource plugin.
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  scrape_interval:     15s    # default for all jobs unless overridden
+  evaluation_interval: 15s
+
+scrape_configs:
+
+  - job_name: ui
+    static_configs:
+      - targets: ['ui:8000']
+
+  - job_name: metrics-collector
+    scrape_interval: 300s     # DB counts change slowly; reduces Aura quota use
+    static_configs:
+      - targets: ['metrics-collector:8001']
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']

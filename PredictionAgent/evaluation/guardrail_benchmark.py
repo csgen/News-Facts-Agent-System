@@ -1,4 +1,4 @@
-"""
+﻿"""
 Guardrail Benchmark — Input Guardrail Performance Evaluation
 
 Tests the two-layer input guardrail against:
@@ -381,3 +381,4 @@ if __name__ == "__main__":
     parser.add_argument("--no-llm", action="store_true", help="Run Layer A only (no LLM calls)")
     args = parser.parse_args()
     run_benchmark(use_llm=not args.no_llm)
+
