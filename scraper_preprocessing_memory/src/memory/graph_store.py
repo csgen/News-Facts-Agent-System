@@ -262,6 +262,44 @@ class GraphStore:
                 new_id=new_verdict_id,
             )
 
+    def get_verdict_timestamps_for_claims(
+        self, claim_ids: list[str]
+    ) -> dict[str, datetime]:
+        """Batch fetch the latest non-superseded verdict verified_at for each claim_id.
+
+        Returns a dict mapping claim_id → verified_at (UTC-aware datetime).
+        Missing entries mean no active verdict exists for that claim.
+        """
+        if not claim_ids:
+            return {}
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                UNWIND $claim_ids AS cid
+                MATCH (c:Claim {claim_id: cid})-[:VERIFIED_AS]->(v:Verdict)
+                WHERE NOT (v)-[:SUPERSEDED_BY]->()
+                RETURN c.claim_id AS claim_id, v.verified_at AS verified_at
+                ORDER BY v.verified_at DESC
+                """,
+                claim_ids=claim_ids,
+            )
+            seen: dict[str, datetime] = {}
+            for record in result:
+                cid = record["claim_id"]
+                if cid in seen:
+                    continue  # already have the most recent (ORDER BY DESC)
+                raw_ts = record["verified_at"]
+                if raw_ts is None:
+                    continue
+                try:
+                    ts = raw_ts.to_native() if hasattr(raw_ts, "to_native") else datetime.fromisoformat(str(raw_ts))
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    seen[cid] = ts
+                except Exception:
+                    pass
+            return seen
+
     # ── Write: Credibility Snapshots (called by Entity Tracker) ─────────
 
     def create_snapshot(

@@ -33,6 +33,9 @@ from fact_check_agent.src.prompts import (
 
 logger = logging.getLogger(__name__)
 
+_MAX_MEMORY_CLAIMS = 5       # top-N prior verified claims passed to verdict synthesis
+_MAX_CLAIMS_PER_QUESTION = 2  # top-N Tavily results kept per question
+
 
 # ── Step 1: question generation ───────────────────────────────────────────────
 
@@ -200,6 +203,7 @@ def run(
     fresh_context: list[dict],
     prefetched_chunks: list[str],
     tavily_api_key: str,
+    input_url: str = "",
 ) -> list[dict]:
     """Run the context claim agent. Returns a list of context_claim dicts."""
     from fact_check_agent.src.tools.live_search_tool import search_live
@@ -279,9 +283,17 @@ def run(
         elif tavily_api_key:
             try:
                 results = search_live(q, api_key=tavily_api_key)
-                high_quality = [r for r in results if (r.get("score") or 0) >= 0.9]
+                high_quality = sorted(
+                    [
+                        r for r in results
+                        if (r.get("score") or 0) >= 0.85
+                        and r.get("url", "") != input_url
+                    ],
+                    key=lambda r: r.get("score") or 0.0,
+                    reverse=True,
+                )[:_MAX_CLAIMS_PER_QUESTION]
                 logger.info(
-                    "context_claim_agent: %d/%d Tavily results pass score≥0.9 for %r",
+                    "context_claim_agent: %d/%d Tavily results pass score≥0.85 (excl. input URL) for %r",
                     len(high_quality),
                     len(results),
                     q[:60],
@@ -304,15 +316,28 @@ def run(
                                 "confidence": None,
                                 "source": "tavily",
                                 "source_url": url,
+                                "score": result.get("score", 0.0),
                             }
                         )
             except Exception as exc:
                 logger.warning("Tavily search failed for %r: %s", q, exc)
 
+    # ── Context optimisation ─────────────────────────────────────────────────
+    # Memory claims: top 5 by prior confidence.
+    # Non-memory claims are already capped to _MAX_CLAIMS_PER_QUESTION before summarization.
+    memory_claims = sorted(
+        [c for c in context_claims if c["source"] == "memory"],
+        key=lambda c: c.get("confidence") or 0.0,
+        reverse=True,
+    )[:_MAX_MEMORY_CLAIMS]
+    non_memory_claims = [c for c in context_claims if c["source"] != "memory"]
+
+    context_claims = memory_claims + non_memory_claims
+
     logger.info(
-        "context_claim_agent: %d context claims (%d memory, %d factual, %d counter-factual)",
+        "context_claim_agent: %d context claims after optimisation (%d memory, %d factual, %d counter-factual)",
         len(context_claims),
-        sum(1 for c in context_claims if c["type"] == "memory"),
+        sum(1 for c in context_claims if c["source"] == "memory"),
         sum(1 for c in context_claims if c["type"] == "factual"),
         sum(1 for c in context_claims if c["type"] == "counter_factual"),
     )

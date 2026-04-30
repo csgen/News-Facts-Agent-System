@@ -1,11 +1,20 @@
 """Centralized LLM prompt templates for the Preprocessing Agent."""
 
 CLAIM_ISOLATION_PROMPT = """\
-You are a fact-checking assistant. Given a news article/short statement, extract all falsifiable claims, at least 1.
+You are a fact-checking assistant. Extract the 1–3 most important falsifiable claims from the article below.
 
-A falsifiable claim is a concrete statement that can be verified as true or false using evidence.
-If there is explicit expression of the statement source, it should also be included in the claim.
-Exclude opinions, questions, and vague statements.
+A falsifiable claim is a concrete, specific statement that can be verified as true or false using evidence.
+
+Rules:
+- Prioritise claims that are CENTRAL to the article's main argument, not background or supporting details.
+- Each claim must be SELF-CONTAINED: replace all pronouns ("it", "they", "this policy", "the company") \
+with the actual named subject. A reader with no article context must understand the claim.
+- EXCLUDE hedged or modal claims ("may", "might", "could", "allegedly", "reportedly") unless the hedge \
+is itself the checkable fact (e.g. "X denied that Y happened" or "Officials claim Z").
+- EXCLUDE vague quantity claims that lack a specific value (e.g. "sales increased significantly").
+- EXCLUDE opinions, predictions about opinions, and rhetorical questions.
+- If the statement source is explicit, include it in the claim text.
+- Return AT MOST 3 claims, ranked by verifiability and centrality to the article.
 
 For each claim, also classify:
 1. type — one of:
@@ -16,20 +25,20 @@ For each claim, also classify:
 2. topic_text — exactly ONE coarse topic category from this list:
    technology | geopolitics | financial | health | science |
    sports | entertainment | climate | crime | art
-   Pick the single best fit. Suggest one word only if no category applies.
+   Pick the single best fit. Use one descriptive word only if truly no category applies.
 
-Article title, if this is a one sentence short statement, use it for title: {title}
+Article title: {title}
 
-Article text:
+Article text (extract claims from this):
 {body_text}
 
 Return a JSON object with this structure:
 {{
   "claims": [
     {{
-      "text": "the exact falsifiable claim",
+      "text": "the exact falsifiable claim, fully self-contained",
       "type": "statistical|attribution|causal|predictive",
-      "topic_text": "technology|geopolitics|financial|health|science|sports|entertainment|climate|crime|art|"
+      "topic_text": "technology|geopolitics|financial|health|science|sports|entertainment|climate|crime|art"
     }}
   ]
 }}

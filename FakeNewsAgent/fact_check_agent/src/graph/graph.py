@@ -25,11 +25,12 @@ from fact_check_agent.src.graph.nodes import (
     multi_agent_debate,
     query_memory,
     receive_claim,
+    return_cached_verdict,
     synthesize_verdict,
     vlm_assessment_node,
     write_memory,
 )
-from fact_check_agent.src.graph.router import debate_check
+from fact_check_agent.src.graph.router import cache_hit_check, debate_check
 from fact_check_agent.src.models.state import FactCheckState
 
 if TYPE_CHECKING:
@@ -99,6 +100,9 @@ def build_graph(memory: "MemoryAgent"):
     _write_memory = _timed("write_memory", lambda s: write_memory(s, memory))
     _receive_claim = _timed("receive_claim", receive_claim)
     _emit_output = _timed("emit_output", emit_output)
+    _return_cached_verdict = _timed(
+        "return_cached_verdict", lambda s: return_cached_verdict(s, memory)
+    )
 
     g = StateGraph(FactCheckState)
 
@@ -106,6 +110,7 @@ def build_graph(memory: "MemoryAgent"):
     g.add_node("receive_claim", _receive_claim)
     g.add_node("query_memory", _query_memory)
     g.add_node("freshness_check_all", _freshness_check_all)
+    g.add_node("return_cached_verdict", _return_cached_verdict)
     g.add_node("context_claim_agent", _context_claim_agent)
     g.add_node("vlm_assessment", _vlm_assessment)
     g.add_node("synthesize_verdict", _synthesize_verdict)
@@ -114,11 +119,21 @@ def build_graph(memory: "MemoryAgent"):
     g.add_node("write_memory", _write_memory)
     g.add_node("emit_output", _emit_output)
 
-    # ── Wire edges (linear — no routing before synthesis) ────────────────────
+    # ── Wire edges ───────────────────────────────────────────────────────────
     g.set_entry_point("receive_claim")
     g.add_edge("receive_claim", "query_memory")
     g.add_edge("query_memory", "freshness_check_all")
-    g.add_edge("freshness_check_all", "context_claim_agent")
+
+    # Cache hit check: near-identical fresh claim with high confidence → skip full pipeline
+    g.add_conditional_edges(
+        "freshness_check_all",
+        cache_hit_check,
+        {
+            "hit": "return_cached_verdict",
+            "miss": "context_claim_agent",
+        },
+    )
+    g.add_edge("return_cached_verdict", "write_memory")
     g.add_edge("context_claim_agent", "vlm_assessment")
     g.add_edge("vlm_assessment", "synthesize_verdict")
 

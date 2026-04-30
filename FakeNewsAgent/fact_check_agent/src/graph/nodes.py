@@ -141,15 +141,24 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
                 "GraphRAG: %d entities → %d graph claims", len(entity_ids), len(graph_results)
             )
 
-    # ── Stage 3: RRF merge + optional cross-encoder rerank ───────────────
+    # ── Stage 3: RRF merge ────────────────────────────────────────────────
     reranked = rerank_candidates(
         query=inp.claim_text,
         vector_results=vector_results,
         graph_results=graph_results,
-        use_cross_encoder=settings.use_cross_encoder,
-        cross_encoder_model=settings.cross_encoder_model,
         top_k=settings.reranker_top_k,
     )
+
+    # Batch-fetch verdict verified_at from Neo4j — authoritative source for timestamps.
+    # The ChromaDB per-claim lookup in rag_tool may miss recently-superseded verdicts
+    # or return stale metadata; a single Neo4j query is both faster and more accurate.
+    neo4j_timestamps: dict = {}
+    try:
+        claim_ids_for_ts = [c["claim_id"] for c in reranked if c.get("claim_id")]
+        if claim_ids_for_ts:
+            neo4j_timestamps = memory.get_verdict_timestamps_for_claims(claim_ids_for_ts)
+    except Exception as _ts_err:
+        logger.warning("query_memory: Neo4j timestamp batch lookup failed: %s", _ts_err)
 
     results = [
         SimilarClaim(
@@ -158,7 +167,8 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
             verdict_label=c.get("verdict_label"),
             verdict_confidence=c.get("verdict_confidence"),
             distance=c.get("distance", 0.0),
-            verified_at=c.get("verified_at"),
+            # Prefer Neo4j verified_at (authoritative); fall back to ChromaDB value
+            verified_at=neo4j_timestamps.get(c["claim_id"]) or c.get("verified_at"),
         )
         for c in reranked
     ]
@@ -182,13 +192,12 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
 
     logger.info(
         "query_memory: %d vector + %d graph → %d reranked, max_confidence=%.2f, "
-        "graph_rag=%s, cross_encoder=%s, topic=%s, source_cred_samples=%d",
+        "graph_rag=%s, topic=%s, source_cred_samples=%d",
         len(vector_results),
         len(graph_results),
         len(results),
         max_confidence,
         settings.use_graph_rag,
-        settings.use_cross_encoder,
         effective_topic,
         source_cred.get("sample_count", 0),
     )
@@ -199,6 +208,74 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
         "source_credibility": source_cred,
         "effective_topic": effective_topic,
     }
+
+
+# ── Node: return_cached_verdict ───────────────────────────────────────────────
+
+_CACHE_EXACT_DISTANCE = 0.05   # cosine distance below which a hit is "the same claim"
+_CACHE_MIN_CONFIDENCE = 0.70   # minimum stored confidence to trust the cached verdict
+
+
+def return_cached_verdict(state: FactCheckState, memory: "MemoryAgent") -> dict:
+    """Short-circuit node: reconstruct FactCheckOutput from the best fresh cache hit.
+
+    Only reached when cache_hit_check() returns "hit". Fetches the full verdict
+    reasoning from memory so the UI can display it without re-running synthesis.
+    """
+    inp = state["input"]
+    fresh = state.get("fresh_context") or []
+
+    # Pick the nearest qualifying hit (lowest distance above confidence threshold)
+    qualifying = [
+        c for c in fresh
+        if c.get("distance", 1.0) < _CACHE_EXACT_DISTANCE
+        and (c.get("verdict_confidence") or 0.0) >= _CACHE_MIN_CONFIDENCE
+        and c.get("verdict_label")
+    ]
+    if not qualifying:
+        logger.warning("return_cached_verdict: no qualifying hit in fresh_context — state mismatch")
+        return {}
+
+    best = min(qualifying, key=lambda c: c.get("distance", 1.0))
+
+    # Fetch full verdict text from memory (evidence_summary stored as ChromaDB document)
+    reasoning = f"[Cached verdict for similar claim: \"{best['claim_text'][:120]}\"]"
+    evidence_links: list[str] = []
+    verdict_id = f"cached_{best['claim_id']}"
+    cross_modal_flag = False
+
+    try:
+        verdict_raw = memory.get_verdict_by_claim(best["claim_id"])
+        if verdict_raw.get("ids"):
+            verdict_id = verdict_raw["ids"][0]
+        if verdict_raw.get("documents") and verdict_raw["documents"]:
+            reasoning = verdict_raw["documents"][0] or reasoning
+        if verdict_raw.get("metadatas") and verdict_raw["metadatas"]:
+            meta = verdict_raw["metadatas"][0]
+            cross_modal_flag = bool(meta.get("image_mismatch", False))
+    except Exception as exc:
+        logger.warning("return_cached_verdict: verdict fetch failed (%s) — using stub reasoning", exc)
+
+    raw_conf = best.get("verdict_confidence") or 0.0
+    confidence_score = int(round(raw_conf * 100)) if raw_conf <= 1.0 else int(round(raw_conf))
+    confidence_score = max(0, min(100, confidence_score))
+
+    output = FactCheckOutput(
+        verdict_id=verdict_id,
+        claim_id=inp.claim_id,
+        verdict=best["verdict_label"],
+        confidence_score=confidence_score,
+        evidence_links=evidence_links,
+        reasoning=reasoning,
+        cross_modal_flag=cross_modal_flag,
+        last_verified_at=best.get("verified_at"),
+    )
+
+    logger.info(
+        "return_cached_verdict: cache hit → verdict=%s conf=%d dist=%.4f cached_claim=%s",
+        output.verdict, output.confidence_score, best["distance"], best["claim_id"],
+    )
+    return {"output": output}
 
 
 # ── Node: freshness_check_all ─────────────────────────────────────────────────
@@ -261,6 +338,7 @@ def context_claim_agent_node(state: FactCheckState, memory: "MemoryAgent", setti
         fresh_context=state.get("fresh_context", []),
         prefetched_chunks=state.get("retrieved_chunks", []),
         tavily_api_key=settings.tavily_api_key,
+        input_url=state["input"].source_url or "",
     )
 
     effective_topic = state.get("effective_topic", "") or state["input"].topic_text
