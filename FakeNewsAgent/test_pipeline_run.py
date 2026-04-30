@@ -8,7 +8,6 @@ Usage (from FakeNewsAgent/):
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
@@ -16,12 +15,13 @@ from pathlib import Path
 
 # Load root .env before any project imports so cloud DB creds are available
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 
 # Bootstrap must fire before any src.* imports from scraper_preprocessing_memory
 import fact_check_agent.src._bootstrap  # noqa: F401
-from fact_check_agent.src.memory_client import get_memory, close_memory
 from fact_check_agent.src.graph.graph import build_graph
+from fact_check_agent.src.memory_client import close_memory, get_memory
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput
 
 logging.basicConfig(

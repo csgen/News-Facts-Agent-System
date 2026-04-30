@@ -19,9 +19,10 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
+from fact_check_agent.src.graph.graph import build_graph
+
 # _bootstrap wires scraper_preprocessing_memory onto sys.path
 from fact_check_agent.src.memory_client import close_memory, get_memory
-from fact_check_agent.src.graph.graph import build_graph
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput
 
 logging.basicConfig(
