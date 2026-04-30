@@ -75,3 +75,116 @@ jobs:
           # First run is full speed (~5-10 min); subsequent runs hit cache (~1-2 min).
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── Smoke test: pull the just-published image and run a few sanity checks ─
+  # Catches container-only runtime issues that unit tests can mask:
+  #   - Imports succeed under the actual PYTHONPATH baked into the image
+  #   - MemoryAgent can connect to a real (sidecar) Neo4j and Chroma
+  #   - Cypher schema applies cleanly
+  #   - Round-trip write/read against both stores works
+  #   - Streamlit can boot the UI and answer its health endpoint
+  #
+  # Free (~3-5 min including image pull). No live API keys needed — everything
+  # runs against ephemeral sidecar containers.
+  smoke:
+    name: Smoke test on published image
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    services:
+      neo4j:
+        image: neo4j:5-community
+        ports: ['7687:7687', '7474:7474']
+        env:
+          NEO4J_AUTH: neo4j/smoketest123
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p smoketest123 'RETURN 1'"
+          --health-interval 5s
+          --health-retries 30
+          --health-timeout 5s
+
+      chroma:
+        image: chromadb/chroma:latest
+        ports: ['8000:8000']
+        options: >-
+          --health-cmd "curl -fsS http://localhost:8000/api/v1/heartbeat || exit 1"
+          --health-interval 5s
+          --health-retries 30
+          --health-timeout 5s
+
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+      # Shared by Smoke 2/3/4 — sidecar service hostnames are reachable from
+      # the runner over `localhost` thanks to GitHub's automatic port forwarding.
+      NEO4J_URI: bolt://localhost:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: smoketest123
+      CHROMA_HOST: localhost
+      CHROMA_PORT: '8000'
+      OPENAI_API_KEY: dummy-not-used
+      GOOGLE_API_KEY: ''
+
+    steps:
+      - name: Pull just-built image
+        run: docker pull "$IMAGE"
+
+      - name: Smoke 1 — imports work in the container
+        run: |
+          docker run --rm "$IMAGE" python -c "
+          from src.memory.agent import MemoryAgent
+          from agents.fact_check_agent import fact_check_claim
+          from agents.memory_agent import get_memory
+          print('IMPORT OK')
+          "
+
+      - name: Smoke 2 — schema init against sidecar Neo4j
+        run: |
+          docker run --rm --network host \
+            -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+            -e CHROMA_HOST -e CHROMA_PORT \
+            -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+            "$IMAGE" python -c "
+          from src.config import settings
+          from src.memory.agent import MemoryAgent
+          MemoryAgent(settings).init_schema()
+          print('SCHEMA OK')
+          "
+
+      - name: Smoke 3 — round-trip write/read on Neo4j + Chroma
+        run: |
+          docker run --rm --network host \
+            -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+            -e CHROMA_HOST -e CHROMA_PORT \
+            -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+            "$IMAGE" python -c "
+          from src.config import settings
+          from src.memory.agent import MemoryAgent
+          m = MemoryAgent(settings)
+          m._graph.ensure_entity_exists('SmokeTestEntity')
+          ent = m.get_entity_by_name('SmokeTestEntity')
+          assert ent is not None and ent['name'].lower() == 'smoketestentity', ent
+          print('ROUND-TRIP OK')
+          "
+
+      - name: Smoke 4 — Streamlit health endpoint
+        run: |
+          docker run -d --name nfs-smoke-ui --network host \
+            -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+            -e CHROMA_HOST -e CHROMA_PORT \
+            -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+            "$IMAGE" sh -c "cd /app/PredictionAgent && streamlit run frontend/app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true"
+
+          # Streamlit takes ~10-30s to fully boot; poll its health endpoint.
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8501/_stcore/health >/dev/null 2>&1; then
+              echo "STREAMLIT OK"
+              docker stop nfs-smoke-ui >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Streamlit failed to boot; container logs:"
+          docker logs nfs-smoke-ui
+          docker stop nfs-smoke-ui >/dev/null
+          exit 1
