@@ -857,6 +857,42 @@ class GraphStore:
             record = result.single()
             return record["url"] if record and record["url"] else None
 
+    def get_unverified_claims_since(self, since: "datetime") -> list[dict]:
+        """Return claims with no verdict written since `since` (UTC).
+
+        Each row contains everything needed to build a FactCheckInput:
+          claim_id, claim_text, claim_type, topic_text, extracted_at,
+          article_id, article_url, image_url, entities (list of dicts).
+        """
+        with self._driver.session() as session:
+            result = session.run(
+                """
+                MATCH (a:Article)-[:CONTAINS]->(c:Claim)
+                WHERE c.status = 'pending'
+                  AND c.extracted_at >= datetime($since)
+                OPTIONAL MATCH (a)-[:HAS_IMAGE]->(img:ImageCaption)
+                OPTIONAL MATCH (c)-[:MENTIONS]->(e:Entity)
+                WITH c, a, img, collect(
+                    CASE WHEN e IS NOT NULL
+                    THEN {entity_id: e.entity_id, name: e.name, entity_type: e.entity_type}
+                    ELSE NULL END
+                ) AS raw_entities
+                RETURN
+                    c.claim_id      AS claim_id,
+                    c.claim_text    AS claim_text,
+                    c.claim_type    AS claim_type,
+                    c.topic_text    AS topic_text,
+                    c.extracted_at  AS extracted_at,
+                    a.article_id    AS article_id,
+                    a.url           AS article_url,
+                    img.image_url   AS image_url,
+                    [e IN raw_entities WHERE e IS NOT NULL] AS entities
+                ORDER BY c.extracted_at ASC
+                """,
+                since=since.isoformat(),
+            )
+            return [dict(record) for record in result]
+
     # ── Feature: Source Bias ────────────────────────────────────────────
 
     def get_source_bias_for_entity(self, entity_name: str) -> list[dict]:

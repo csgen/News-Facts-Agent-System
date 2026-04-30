@@ -370,6 +370,10 @@ class MemoryAgent:
     def get_verdict_timestamps_for_claims(self, claim_ids: list[str]) -> dict:
         return self._graph.get_verdict_timestamps_for_claims(claim_ids)
 
+    def get_unverified_claims_since(self, since: "datetime") -> list[dict]:
+        """Return unverified claims extracted after `since` (UTC datetime)."""
+        return self._graph.get_unverified_claims_since(since)
+
     def get_entity_context(self, claim_id: str) -> list[dict]:
         return self._graph.get_entity_context(claim_id)
 
