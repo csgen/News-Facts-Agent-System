@@ -24,9 +24,7 @@ os.environ.setdefault("NEO4J_PASSWORD", "test_unused")
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-unused")
 
 import pytest  # noqa: E402
-
 from src import pipeline  # noqa: E402
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers

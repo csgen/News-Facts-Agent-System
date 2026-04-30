@@ -29,7 +29,6 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-unused")
 
 from scripts import metrics_collector as mc  # noqa: E402
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────

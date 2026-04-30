@@ -27,7 +27,6 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-unused")
 from src.memory.agent import MemoryAgent  # noqa: E402
 from src.memory.graph_store import GraphStore  # noqa: E402
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
