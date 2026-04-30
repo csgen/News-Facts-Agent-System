@@ -26,6 +26,10 @@ Di SCALE — use EXACTLY one of these five values per item:
 IMPORTANT: For COUNTER-FACTUAL items — if the evidence confirms the counter-factual
 question, that CHALLENGES the main claim → assign a NEGATIVE degree.
 
+IMPORTANT: For MEMORY items — treat the prior verdict as the primary signal: "supported"
+→ positive Di, "refuted" → negative Di, scaled by how closely the memory claim matches
+the current one. Trust the prior verdict; do not re-litigate it from your own knowledge.
+
 In the "reasoning" field, describe the evidence by its actual text/content, NOT by number.
 Good: "Reuters reported the recall affected 500 vehicles, directly supporting the claim."
 Bad: "Evidence [3] supports the claim." — the user never sees the evidence numbers.

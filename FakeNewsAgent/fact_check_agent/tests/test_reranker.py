@@ -2,9 +2,8 @@
 
 Covers:
   - reciprocal_rank_fusion: merge, deduplication, ordering
-  - cross_encoder_rerank: top_k, score attachment, error fallback
-  - rerank_candidates: RRF-only, RRF+cross-encoder, single list, empty input
-  - query_memory node: USE_GRAPH_RAG flag, USE_CROSS_ENCODER flag, verdict revision
+  - rerank_candidates: RRF merge, single list, empty input
+  - query_memory node: USE_GRAPH_RAG flag, verdict revision
 """
 
 import json
@@ -86,15 +85,13 @@ def test_rrf_one_empty_one_populated():
 # ── rerank_candidates ─────────────────────────────────────────────────────────
 
 
-def test_rerank_candidates_rrf_only_no_cross_encoder():
+def test_rerank_candidates_rrf_merge():
     vector = [make_claim("c1"), make_claim("c2"), make_claim("c3")]
     graph = [make_claim("c4"), make_claim("c1")]  # c1 appears in both
     result = rerank_candidates(
         query="test query",
         vector_results=vector,
         graph_results=graph,
-        use_cross_encoder=False,
-        cross_encoder_model="",
         top_k=3,
     )
     ids = [r["claim_id"] for r in result]
@@ -109,8 +106,6 @@ def test_rerank_candidates_top_k_respected():
         query="q",
         vector_results=vector,
         graph_results=[],
-        use_cross_encoder=False,
-        cross_encoder_model="",
         top_k=4,
     )
     assert len(result) == 4
@@ -121,8 +116,6 @@ def test_rerank_candidates_empty_inputs():
         query="q",
         vector_results=[],
         graph_results=[],
-        use_cross_encoder=False,
-        cross_encoder_model="",
         top_k=5,
     )
     assert result == []
@@ -134,49 +127,9 @@ def test_rerank_candidates_graph_only():
         query="q",
         vector_results=[],
         graph_results=graph,
-        use_cross_encoder=False,
-        cross_encoder_model="",
         top_k=5,
     )
     assert [r["claim_id"] for r in result] == ["g1", "g2"]
-
-
-def test_rerank_candidates_cross_encoder_called_when_enabled():
-    vector = [make_claim("c1"), make_claim("c2")]
-    with patch("fact_check_agent.src.tools.reranker._load_cross_encoder") as mock_load:
-        mock_model = MagicMock()
-        mock_model.predict.return_value = [0.9, 0.3]
-        mock_load.return_value = mock_model
-
-        result = rerank_candidates(
-            query="q",
-            vector_results=vector,
-            graph_results=[],
-            use_cross_encoder=True,
-            cross_encoder_model="cross-encoder/ms-marco-MiniLM-L-6-v2",
-            top_k=2,
-        )
-
-    mock_model.predict.assert_called_once()
-    assert result[0]["claim_id"] == "c1"  # higher score
-    assert result[0]["cross_encoder_score"] == pytest.approx(0.9)
-
-
-def test_rerank_candidates_cross_encoder_fallback_on_error():
-    vector = [make_claim("c1"), make_claim("c2"), make_claim("c3")]
-    with patch("fact_check_agent.src.tools.reranker._load_cross_encoder") as mock_load:
-        mock_load.side_effect = RuntimeError("model not found")
-        result = rerank_candidates(
-            query="q",
-            vector_results=vector,
-            graph_results=[],
-            use_cross_encoder=True,
-            cross_encoder_model="bad-model",
-            top_k=2,
-        )
-    # Falls back to original order, top_k respected
-    assert len(result) == 2
-    assert result[0]["claim_id"] == "c1"
 
 
 # ── query_memory node with GraphRAG flags ─────────────────────────────────────
@@ -203,18 +156,9 @@ def make_memory_mock_with_similar(claims=None):
     return memory
 
 
-def _make_settings(use_graph_rag=False, use_cross_encoder=False, top_k=5):
-    """Build a settings MagicMock with all guards explicitly set false.
-
-    MagicMock's default behaviour is to return a fresh MagicMock for any unset
-    attribute, and a MagicMock is truthy. That means `if settings.offline_mode:`
-    in query_memory short-circuits to True unless we set offline_mode=False
-    here, causing tests to fail with "expected call ... Called 0 times."
-    """
+def _make_settings(use_graph_rag=False, top_k=5):
     s = MagicMock()
     s.use_graph_rag = use_graph_rag
-    s.use_cross_encoder = use_cross_encoder
-    s.cross_encoder_model = "" if not use_cross_encoder else "cross-encoder/ms-marco-MiniLM-L-6-v2"
     s.reranker_top_k = top_k
     s.offline_mode = False
     s.dry_run = False
@@ -275,7 +219,6 @@ def test_query_memory_graph_rag_enabled_calls_entity_expansion():
 
     memory.get_entity_ids_for_claims.assert_called_once_with(["c1"])
     memory.get_graph_claims_for_entities.assert_called_once_with(["ent_1"])
-    # Both c1 (vector) and c2 (graph) should appear in results
     ids = [r.claim_id for r in result["memory_results"].results]
     assert "c1" in ids
     assert "c2" in ids
@@ -285,7 +228,7 @@ def test_query_memory_graph_rag_no_vector_results_skips_expansion():
     """With USE_GRAPH_RAG=true but no vector results, graph expansion is skipped."""
     from fact_check_agent.src.graph.nodes import query_memory
 
-    memory = make_memory_mock_with_similar([])  # empty vector results
+    memory = make_memory_mock_with_similar([])
     settings = _make_settings(use_graph_rag=True)
 
     state = {"input": make_fci()}
@@ -298,36 +241,10 @@ def test_query_memory_graph_rag_no_vector_results_skips_expansion():
     memory.get_entity_ids_for_claims.assert_not_called()
 
 
-def test_query_memory_cross_encoder_called_when_flag_set():
-    """With USE_CROSS_ENCODER=true, cross_encoder_rerank is invoked."""
-    from fact_check_agent.src.graph.nodes import query_memory
-
-    similar = [make_claim("c1"), make_claim("c2")]
-    memory = make_memory_mock_with_similar(similar)
-
-    settings = _make_settings(use_cross_encoder=True)
-
-    state = {"input": make_fci()}
-    with (
-        patch("fact_check_agent.src.tools.reranker._load_cross_encoder") as mock_load,
-        patch(
-            "fact_check_agent.src.agents.reflection_agent.query_source_credibility",
-            return_value={"sample_count": 0},
-        ),
-    ):
-        mock_model = MagicMock()
-        mock_model.predict.return_value = [0.8, 0.5]
-        mock_load.return_value = mock_model
-        query_memory(state, memory, settings)
-
-    mock_model.predict.assert_called_once()
-
-
 # ── Verdict revision ──────────────────────────────────────────────────────────
 
 
 def _ensure_memory_agent_env():
-    """Set minimum env vars so memory_agent Settings() can be instantiated."""
     import os
 
     os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
@@ -336,7 +253,6 @@ def _ensure_memory_agent_env():
 
 
 def _stub_missing_modules():
-    """Stub heavy/unavailable deps so src.memory.agent can be imported in CI."""
     import sys
     from unittest.mock import MagicMock as _M
 
@@ -349,7 +265,6 @@ def _stub_missing_modules():
         "chromadb",
     ]:
         sys.modules.setdefault(mod, _M())
-    # google.genai must also be reachable as google_mod.genai
     google_mod = sys.modules.get("google", _M())
     if not hasattr(google_mod, "genai"):
         google_mod.genai = sys.modules["google.genai"]

@@ -55,10 +55,6 @@ class Settings(BaseSettings):
 
     # Retrieval enhancements
     use_graph_rag: bool = False  # enable Neo4j entity-claim traversal in query_memory
-    use_cross_encoder: bool = (
-        False  # rerank merged results with cross-encoder (requires sentence-transformers)
-    )
-    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_top_k: int = 5  # final number of chunks passed to synthesizer
 
     # Cross-modal consistency — SigLIP

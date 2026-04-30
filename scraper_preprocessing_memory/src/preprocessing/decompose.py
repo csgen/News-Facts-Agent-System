@@ -85,6 +85,7 @@ def _get_openai_client() -> OpenAI:
 _URL_RE = re.compile(r"^\s*https?://", re.IGNORECASE)
 _SENTENCE_RE = re.compile(r"[.!?]+\s+")
 _ARTICLE_LEN_THRESHOLD = 500  # chars; or 2+ sentences also counts as article
+_CLAIM_ISOLATION_BODY_LIMIT = 3000  # chars sent to ClaimIsolator; lead paragraphs have the key claims
 
 
 def _classify(query: str) -> Literal["url", "article", "claim"]:
@@ -198,10 +199,13 @@ def _article_to_raw(text: str) -> RawArticle:
     if not title or not body:
         title, body = _heuristic_title_split(text)
 
+    # Hash on the full body so deduplication is accurate even when two articles
+    # share the same lead but differ later. ClaimIsolator only sees the truncated
+    # portion — lead paragraphs contain the primary verifiable claims.
     return RawArticle(
         url="",
         title=title,
-        body_text=body,
+        body_text=body[:_CLAIM_ISOLATION_BODY_LIMIT],
         image_urls=[],
         source_name="Frontend User Input",
         source_domain="frontend.local",
@@ -315,7 +319,7 @@ def _url_to_raw(url: str) -> RawArticle:
     return RawArticle(
         url=url,
         title=title or domain,
-        body_text=body,
+        body_text=body[:_CLAIM_ISOLATION_BODY_LIMIT],
         image_urls=image_urls,
         source_name=domain,
         source_domain=domain,

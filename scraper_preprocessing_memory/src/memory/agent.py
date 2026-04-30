@@ -337,6 +337,9 @@ class MemoryAgent:
     def get_verdict_by_claim(self, claim_id: str) -> dict:
         return self._vector.get_verdict_by_claim(claim_id)
 
+    def get_verdict_timestamps_for_claims(self, claim_ids: list[str]) -> dict:
+        return self._graph.get_verdict_timestamps_for_claims(claim_ids)
+
     def get_entity_context(self, claim_id: str) -> list[dict]:
         return self._graph.get_entity_context(claim_id)
 
