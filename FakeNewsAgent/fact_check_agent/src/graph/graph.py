@@ -93,9 +93,9 @@ def build_graph(memory: "MemoryAgent"):
     _context_claim_agent = _timed(
         "context_claim_agent", lambda s: context_claim_agent_node(s, memory, settings)
     )
-    _vlm_assessment = _timed("vlm_assessment", lambda s: vlm_assessment_node(s, settings))
-    _synthesize_verdict = _timed("synthesize_verdict", lambda s: synthesize_verdict(s, settings))
-    _multi_agent_debate = _timed("multi_agent_debate", lambda s: multi_agent_debate(s, settings))
+    _vlm_assessment = _timed("vlm_assessment", lambda s: vlm_assessment_node(s, memory, settings))
+    _synthesize_verdict = _timed("synthesize_verdict", lambda s: synthesize_verdict(s, memory, settings))
+    _multi_agent_debate = _timed("multi_agent_debate", lambda s: multi_agent_debate(s, memory, settings))
     _cross_modal_check = _timed("cross_modal_check", lambda s: cross_modal_check(s, settings))
     _write_memory = _timed("write_memory", lambda s: write_memory(s, memory))
     _receive_claim = _timed("receive_claim", receive_claim)

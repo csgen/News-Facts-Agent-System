@@ -15,6 +15,7 @@ from fact_check_agent.src.agents.reflection_agent import (
     query_source_credibility,
     record_verdict_outcome,
 )
+from fact_check_agent.src.failure_logger import log_failure
 from fact_check_agent.src.models.schemas import (
     FactCheckOutput,
     MemoryQueryResponse,
@@ -127,8 +128,31 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
     inp = state["input"]
 
     # ── Stage 1: vector similarity search ────────────────────────────────
-    vector_results = retrieve_similar_claims(inp.claim_text, memory)
-    entity_ctx = memory.get_entity_context(inp.claim_id)
+    try:
+        vector_results = retrieve_similar_claims(inp.claim_text, memory)
+    except Exception as exc:
+        logger.warning("query_memory: vector search failed — proceeding without memory context: %s", exc)
+        log_failure(
+            memory=memory,
+            claim_id=inp.claim_id,
+            node_name="query_memory",
+            failure_type="db_error",
+            exception=exc,
+        )
+        vector_results = []
+
+    try:
+        entity_ctx = memory.get_entity_context(inp.claim_id)
+    except Exception as exc:
+        logger.warning("query_memory: entity context lookup failed: %s", exc)
+        log_failure(
+            memory=memory,
+            claim_id=inp.claim_id,
+            node_name="query_memory",
+            failure_type="db_error",
+            exception=exc,
+        )
+        entity_ctx = []
 
     # ── Stage 2: GraphRAG — expand via entity-claim traversal ────────────
     graph_results: list[dict] = []
@@ -231,6 +255,7 @@ def return_cached_verdict(state: FactCheckState, memory: "MemoryAgent") -> dict:
         if c.get("distance", 1.0) < _CACHE_EXACT_DISTANCE
         and (c.get("verdict_confidence") or 0.0) >= _CACHE_MIN_CONFIDENCE
         and c.get("verdict_label")
+        and c.get("verdict_label") != "misleading"
     ]
     if not qualifying:
         logger.warning("return_cached_verdict: no qualifying hit in fresh_context — state mismatch")
@@ -300,7 +325,7 @@ def freshness_check_all(state: FactCheckState, settings) -> dict:
     for claim in results:
         chunk = claim.model_dump()
 
-        if not claim.verified_at or not claim.verdict_label:
+        if not claim.verified_at or not claim.verdict_label or claim.verdict_label == "misleading":
             stale.append(chunk)
             continue
 
@@ -389,7 +414,7 @@ def context_claim_agent_node(state: FactCheckState, memory: "MemoryAgent", setti
 # ── Node: vlm_assessment ─────────────────────────────────────────────────────
 
 
-def vlm_assessment_node(state: FactCheckState, settings) -> dict:
+def vlm_assessment_node(state: FactCheckState, memory=None, settings=None) -> dict:
     """Run VLM visual assessment — generates vlm_assessment_block for the Judge.
 
     Calls IMAGE_CLAIM_ASSESSOR_PROMPT (v2.1) via the configured vision-capable
@@ -447,6 +472,13 @@ def vlm_assessment_node(state: FactCheckState, settings) -> dict:
 
     except Exception as exc:
         logger.error("vlm_assessment_node failed: %s — skipping VLM signal", exc)
+        log_failure(
+            memory=memory,
+            claim_id=inp.claim_id,
+            node_name="vlm_assessment",
+            failure_type="llm_api_error",
+            exception=exc,
+        )
         return {"vlm_assessment_block": "No image available."}
 
 
@@ -540,7 +572,7 @@ def _compute_verdict(
     return verdict, confidence, evidence_volume
 
 
-def synthesize_verdict(state: FactCheckState, settings) -> dict:
+def synthesize_verdict(state: FactCheckState, memory=None, settings=None) -> dict:
     """Synthesise a credibility-weighted verdict using V = Σ(Di×Ci) / Σ|Ci|.
 
     The LLM assigns a signed Degree of Support Di ∈ {-1,-0.5,0,0.5,1} per claim
@@ -559,6 +591,7 @@ def synthesize_verdict(state: FactCheckState, settings) -> dict:
     )
 
     client = _llm_factory.make_llm_client()
+    raw = ""
     try:
         response = client.chat.completions.create(
             model=_llm_factory.llm_model_name(),
@@ -580,7 +613,16 @@ def synthesize_verdict(state: FactCheckState, settings) -> dict:
             raw = response.choices[0].message.content or ""
         result = json.loads(raw.strip())
     except Exception as e:
+        failure_type = "json_parse_error" if isinstance(e, (json.JSONDecodeError, ValueError)) else "llm_api_error"
         logger.error("Verdict synthesis failed: %s", e)
+        log_failure(
+            memory=memory,
+            claim_id=inp.claim_id,
+            node_name="synthesize_verdict",
+            failure_type=failure_type,
+            exception=e,
+            raw_llm_response=raw,
+        )
         result = {"degrees": [], "reasoning": str(e)}
 
     degrees = [float(x) for x in result.get("degrees", [])]
@@ -638,7 +680,7 @@ def _parse_json_response(raw: str) -> dict:
     return json.loads(raw)
 
 
-def multi_agent_debate(state: FactCheckState, settings) -> dict:
+def multi_agent_debate(state: FactCheckState, memory=None, settings=None) -> dict:
     """S4: 4-role structured debate for low-confidence verdicts and/or VLM image signal.
 
     Two entry modes:
@@ -672,6 +714,7 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
             raw = raw.split("```")[1].lstrip("json").strip()
         return raw
 
+    _last_raw = ""
     try:
         if settings.use_debate:
             # ── Full S4: Supporter + Skeptic + Judge ──────────────────────────
@@ -682,6 +725,7 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
                     neutral_scores_block=neutral_block,
                 )
             )
+            _last_raw = supporter_raw
             supporter_result = json.loads(supporter_raw)
             supporter_adj = supporter_result.get("adjustments", [])
 
@@ -692,6 +736,7 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
                     neutral_scores_block=neutral_block,
                 )
             )
+            _last_raw = skeptic_raw
             skeptic_result = json.loads(skeptic_raw)
             skeptic_adj = skeptic_result.get("adjustments", [])
 
@@ -748,6 +793,7 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
                 vlm_assessment_block=vlm_block,
             )
         )
+        _last_raw = judge_raw
         judge_result = json.loads(judge_raw)
 
         # Extract final Di per evidence item from Judge's output
@@ -832,7 +878,16 @@ def multi_agent_debate(state: FactCheckState, settings) -> dict:
         return {"output": updated_output, "debate_transcript": transcript}
 
     except Exception as e:
+        failure_type = "json_parse_error" if isinstance(e, (json.JSONDecodeError, ValueError)) else "llm_api_error"
         logger.error("multi_agent_debate failed: %s — keeping original verdict", e)
+        log_failure(
+            memory=memory,
+            claim_id=inp.claim_id,
+            node_name="multi_agent_debate",
+            failure_type=failure_type,
+            exception=e,
+            raw_llm_response=_last_raw,
+        )
         return {}
 
 

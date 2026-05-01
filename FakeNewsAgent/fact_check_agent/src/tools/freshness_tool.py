@@ -52,16 +52,21 @@ def _check_freshness_single(
         time_since_verified_days=time_since_verified_days,
     )
     client = _llm_factory.make_llm_client()
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=0,
-    )
-    raw = response.choices[0].message.content.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1].lstrip("json").strip()
-    return json.loads(raw)
+    raw = ""
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1].lstrip("json").strip()
+        return json.loads(raw)
+    except Exception as exc:
+        logger.warning("_check_freshness_single failed (raw=%r): %s", raw[:200], exc)
+        raise
 
 
 def _check_freshness_react(

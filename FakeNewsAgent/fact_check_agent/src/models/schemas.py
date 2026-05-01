@@ -5,7 +5,7 @@ Do not change field names without versioning and notifying downstream consumers.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -63,7 +63,7 @@ class FactCheckOutput(BaseModel):
 
     verdict_id: str
     claim_id: str
-    verdict: str  # "supported" | "refuted" | "misleading"
+    verdict: Literal["supported", "refuted", "misleading"]
     confidence_score: int = Field(ge=0, le=100)  # 0–100 int for API; stored as float/100 in memory
     evidence_links: list[str]  # source URLs supporting the verdict
     reasoning: str  # chain-of-thought explanation
