@@ -10,7 +10,6 @@ Skipped here (covered elsewhere or out of scope):
   - `layer_b_check` / `check_input` — LLM-dependent, requires OPENAI_API_KEY mock
 """
 import pytest
-
 from agents.input_guardrail import (
     _check_gibberish,
     _check_hate,
@@ -18,7 +17,6 @@ from agents.input_guardrail import (
     _check_length,
     _check_pii,
 )
-
 
 # ── _check_injection ─────────────────────────────────────────────────────────
 

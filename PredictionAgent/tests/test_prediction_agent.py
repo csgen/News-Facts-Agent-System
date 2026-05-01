@@ -11,7 +11,6 @@ and require no external services. They cover:
 """
 
 import pytest
-
 from agents.prediction_agent import (
     _rule_based_confidence,
     _rule_based_prediction,
