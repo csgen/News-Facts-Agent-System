@@ -132,11 +132,15 @@ jobs:
       GOOGLE_API_KEY: ''
 
     steps:
-      - name: Compute lowercase image name
-        # `${VAR,,}` is bash parameter expansion that lowercases the value.
-        # Writing to $GITHUB_ENV makes the variable visible to all later
-        # steps as `$IMAGE`, exactly as if we'd set it at the job level.
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - name: Compute image reference (lowercased + short SHA)
+        # Two transforms vs the literal ${{ github.repository }}:sha-${{ github.sha }}:
+        #   1. ${VAR,,}        — lowercase the repo path (Docker requires it)
+        #   2. ${GITHUB_SHA:0:7} — short SHA, matching docker/metadata-action's
+        #                          default `type=sha,prefix=sha-` behaviour
+        #                          (7 chars, not the full 40). Without this,
+        #                          docker pull fails with "manifest unknown".
+        # Writing to $GITHUB_ENV makes $IMAGE visible to every later step.
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
 
       - name: Wait for Chroma to be ready (heartbeat poll)
         run: |
