@@ -14,10 +14,13 @@ Low probability → claim doesn't describe the image → potential conflict.
 
 import base64
 import io
+import ipaddress
 import json
 import logging
+import socket
 from functools import lru_cache
 from typing import Optional
+from urllib.parse import urlparse
 
 from openai import OpenAI
 
@@ -26,6 +29,30 @@ from fact_check_agent.src.config import settings
 from fact_check_agent.src.prompts import CROSS_MODAL_PROMPT, CROSS_MODAL_VISION_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_image_url(url: str) -> None:
+    """Raise ValueError if url targets a non-public address (SSRF guard).
+
+    Blocks non-HTTP/S schemes and all RFC 1918 / loopback / link-local
+    addresses, including the AWS/GCP/Azure instance metadata endpoint
+    (169.254.169.254). Checks every DNS A/AAAA record returned so a
+    multi-homed host can't sneak a private address past the check.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Blocked URL scheme {parsed.scheme!r} — only http/https allowed")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("URL has no hostname")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"Cannot resolve hostname {host!r}: {exc}") from exc
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise ValueError(f"Blocked: {addr} is a non-public address")
 
 
 @lru_cache(maxsize=1)
@@ -45,9 +72,10 @@ def _decode_image(image_url: str):
     from PIL import Image as PILImage
 
     if image_url.startswith("data:"):
-        # data:image/jpeg;base64,<b64>
         header, b64 = image_url.split(",", 1)
         return PILImage.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+
+    _validate_image_url(image_url)
 
     import urllib.request
 
@@ -205,6 +233,8 @@ def _ensure_base64_uri(image_url: str) -> Optional[str]:
     if image_url.startswith("data:"):
         return image_url
     try:
+        _validate_image_url(image_url)
+
         import urllib.request
 
         req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})

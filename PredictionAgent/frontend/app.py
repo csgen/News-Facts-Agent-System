@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import threading
 import time
 
+import bleach
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -93,6 +94,24 @@ _hitl_handler = logging.FileHandler(_LOG_DIR / "hitl_audit.log")
 _hitl_handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
 _hitl_log.addHandler(_hitl_handler)
 _hitl_log.setLevel(logging.INFO)
+
+
+# ── HTML sanitization ─────────────────────────
+_SAFE_TAGS = [
+    "b", "i", "em", "strong", "br", "p", "span",
+    "ul", "ol", "li", "code", "pre",
+]
+
+
+def _safe_html(text: str) -> str:
+    """Sanitize LLM/user-generated text before unsafe_allow_html rendering.
+
+    Strips all HTML tags except a safe formatting allowlist. Prevents XSS
+    from malicious LLM outputs, scraped content, or injected claim text.
+    """
+    if not isinstance(text, str):
+        return str(text) if text is not None else ""
+    return bleach.clean(text, tags=_SAFE_TAGS, attributes={}, strip=True)
 
 
 # ── Rate limiter ──────────────────────────────
@@ -268,6 +287,21 @@ def _get_memory():
     return memory
 
 
+def _log_app_failure(claim_id: str, node_name: str, failure_type: str, exception: Exception) -> None:
+    """Call log_failure from the app layer — memory may be unavailable, which is fine."""
+    try:
+        from fact_check_agent.src.failure_logger import log_failure
+        log_failure(
+            memory=_get_memory(),
+            claim_id=claim_id,
+            node_name=node_name,
+            failure_type=failure_type,
+            exception=exception,
+        )
+    except Exception:
+        pass  # log_failure unavailable — app continues without DB/Prometheus logging
+
+
 # ─────────────────────────────────────────────
 # REAL BACKEND FUNCTIONS
 # ─────────────────────────────────────────────
@@ -397,7 +431,8 @@ def _aggregate_label(verdicts: list) -> str:
     return top[0]
 
 
-def _empty_result(query: str, err_msg: str, image_url: str = "") -> dict:
+def _empty_result(query: str, err_msg: str, image_url: str = "", failure_type: str = "") -> dict:
+    """Return an error placeholder that the UI renders as an error banner, not a verdict card."""
     return {
         "verdict_id": None,
         "label": "misleading",
@@ -411,6 +446,27 @@ def _empty_result(query: str, err_msg: str, image_url: str = "") -> dict:
         "charged_phrases": [],
         "claims": [],
         "is_multi": False,
+        "system_error": True,
+        "failure_type": failure_type,
+    }
+
+
+def _no_claims_result(query: str, image_url: str = "") -> dict:
+    """Return a neutral placeholder when the article had no extractable claims."""
+    return {
+        "verdict_id": None,
+        "label": "misleading",
+        "confidence": 0.0,
+        "claim_text": query[:200],
+        "evidence_summary": "No claims could be extracted from this input.",
+        "image_mismatch": False,
+        "image_url": image_url,
+        "vlm_caption": "",
+        "sources": [],
+        "charged_phrases": [],
+        "claims": [],
+        "is_multi": False,
+        "no_claims_found": True,
     }
 
 
@@ -452,23 +508,34 @@ def get_real_verdict(query: str) -> dict:
 
     # ── Decompose input → ingest claims → return claim_ids ──────────────
     try:
-        from src.preprocessing.decompose import URLFetchError, decompose_input
+        from src.preprocessing.decompose import ContentBlockedError, URLFetchError, decompose_input
     except ImportError as _ie:
-        st.error(f"Preprocessing module unavailable: {_ie}")
-        return _empty_result(query, f"Preprocessing import failed: {_ie}")
+        logging.getLogger(__name__).error("Preprocessing import failed", exc_info=True)
+        _log_app_failure("", "app.decompose_import", "import_error", _ie)
+        st.error("Preprocessing service is unavailable. Please try again later.")
+        return _empty_result(query, "Preprocessing service is unavailable. Please try again later.", failure_type="import_error")
 
     try:
         with st.spinner("🔎 Decomposing input → claims + entities…"):
             claim_ids = decompose_input(query)
+    except ContentBlockedError:
+        logging.getLogger(__name__).warning("Article body blocked by content guard: %s", query[:80])
+        _log_app_failure("", "app.content_guard", "validation_error", ContentBlockedError("article body blocked"))
+        st.warning("⚠️ This article was blocked by the content safety filter.")
+        return _empty_result(query, "This article was blocked by the content safety filter.", failure_type="validation_error")
     except URLFetchError as _uf:
-        st.warning(f"⚠️ Could not fetch URL: {_uf}")
-        return _empty_result(query, f"URL fetch failed: {_uf}")
+        logging.getLogger(__name__).warning("URL fetch failed: %s", _uf)
+        _log_app_failure("", "app.url_fetch", "api_error", _uf)
+        st.warning("⚠️ Could not fetch this URL. Please check it is publicly accessible.")
+        return _empty_result(query, "Could not fetch this URL. Please check it is publicly accessible.", failure_type="api_error")
     except Exception as _de:
-        st.error(f"Decomposition failed: {_de}")
-        return _empty_result(query, f"Decomposition error: {_de}")
+        logging.getLogger(__name__).error("Decomposition failed", exc_info=True)
+        _log_app_failure("", "app.decompose", "api_error", _de)
+        st.error("An error occurred while processing your input. Please try again.")
+        return _empty_result(query, "An error occurred while processing your input. Please try again.", failure_type="api_error")
 
     if not claim_ids:
-        return _empty_result(query, "No claims could be extracted from this input.")
+        return _no_claims_result(query)
 
     # ── SecOps: scan extracted claims for indirect prompt injection ───────
     # Protects against malicious article content that bypasses URL-level checks.
@@ -489,9 +556,11 @@ def get_real_verdict(query: str) -> dict:
                             "BLOCKED_URL_CONTENT | hash=%s | risk=%s | reason=%s",
                             _ch, _cg["risk"], _cg["reason"],
                         )
+                        _log_app_failure("", "app.content_guard", "validation_error", ValueError(f"blocked content: {_cg['reason']}"))
                         return _empty_result(
                             query,
                             f"⚠️ Article content blocked [{_cg['risk']} risk]: {_cg['reason']}",
+                            failure_type="validation_error",
                         )
     except Exception:
         pass  # scan failure never blocks the pipeline
@@ -502,12 +571,20 @@ def get_real_verdict(query: str) -> dict:
 
         with st.spinner(f"🔍 Fact-checking {len(claim_ids)} claim(s)…"):
             verdicts = run_fact_check_by_claim_ids(claim_ids)
-    except Exception as e:
-        st.error(f"Fact-Check Agent unavailable: {e}")
-        return _empty_result(query, f"Pipeline error: {e}")
+    except ImportError as _fe:
+        logging.getLogger(__name__).error("Fact-check agent import failed", exc_info=True)
+        _log_app_failure("", "app.fact_check_import", "import_error", _fe)
+        st.error("Fact-checking is temporarily unavailable. Please try again.")
+        return _empty_result(query, "Fact-checking is temporarily unavailable. Please try again.", failure_type="import_error")
+    except Exception as _fe:
+        logging.getLogger(__name__).error("Fact-check pipeline failed", exc_info=True)
+        _log_app_failure("", "app.fact_check_pipeline", "api_error", _fe)
+        st.error("Fact-checking is temporarily unavailable. Please try again.")
+        return _empty_result(query, "Fact-checking is temporarily unavailable. Please try again.", failure_type="api_error")
 
     if not verdicts:
-        return _empty_result(query, "No verdicts produced by the fact-check pipeline.")
+        _log_app_failure("", "app.fact_check_no_verdicts", "api_error", ValueError("no verdicts returned by pipeline"))
+        return _empty_result(query, "No verdicts produced by the fact-check pipeline.", failure_type="api_error")
 
     # ── Surface entity names for the entity tracker box ─────────────────
     try:
@@ -663,8 +740,9 @@ def get_real_entity_history(entity_name: str) -> pd.DataFrame:
 
         return pd.DataFrame(rows)
 
-    except Exception as e:
-        st.warning(f"Could not load entity history: {e}")
+    except Exception:
+        logging.getLogger(__name__).error("Entity history load failed", exc_info=True)
+        st.warning("Could not load entity history. Please try again later.")
         return _empty_entity_df()
 
 
@@ -704,8 +782,9 @@ def get_real_predictions(entity_name: str) -> list:
             )
         return result
 
-    except Exception as e:
-        st.warning(f"Could not load predictions: {e}")
+    except Exception:
+        logging.getLogger(__name__).error("Predictions load failed", exc_info=True)
+        st.warning("Could not load predictions. Please try again later.")
         return []
 
 
@@ -1053,9 +1132,8 @@ if run_btn and user_input.strip():
         logging.warning("[schema] Invalid verdict returned: %s — %s", result, _err)
         result["label"] = "misleading"
         result["confidence"] = 0.0
-        result["evidence_summary"] = f"[Schema validation failed: {_err}] " + result.get(
-            "evidence_summary", ""
-        )
+        logging.getLogger(__name__).warning("[schema] validation error detail: %s", _err)
+        result["evidence_summary"] = "Verdict could not be fully verified. Please try again."
 
     # ── Persist result so widget interactions (slider, radio) don't wipe it ──
     st.session_state["_last_result"] = result
@@ -1184,108 +1262,123 @@ if _cached_result and (run_btn or not run_btn):
         left, right = st.columns([3, 2])
 
         with left:
-            label = result["label"]
-            st.markdown(
-                f"""
-            <div class="verdict-card verdict-{label}">
-                <div style="margin-bottom:0.8rem">{render_verdict_badge(label)}</div>
-                <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:0.8rem; font-style:italic;">
-                    "{result["claim_text"]}"
-                </div>
-                <div style="font-size:0.9rem; color:#cbd5e1; line-height:1.7;">
-                    {result["evidence_summary"]}
-                </div>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
-
-            # Verified sources
-            st.markdown(
-                '<div class="section-header" style="margin-top:1rem">Verified Sources</div>',
-                unsafe_allow_html=True,
-            )
-            if result["sources"]:
-                source_html = ""
-                for src in result["sources"]:
-                    cred_color = "#10b981" if src["credibility"] > 0.7 else "#ef4444"
-                    source_html += f'<span class="source-pill">🔗 {src["name"]} <span style="color:{cred_color}; font-weight:600;">{src["credibility"]:.0%}</span></span>'
-                st.markdown(source_html, unsafe_allow_html=True)
+            if result.get("system_error"):
+                st.error(
+                    f"**Unable to verify this claim.**\n\n{result['evidence_summary']}"
+                )
+            elif result.get("no_claims_found"):
+                st.info(
+                    "**No claims could be extracted from this input.** "
+                    "The article may not contain verifiable factual claims. "
+                    "Try submitting a different URL or a specific claim statement."
+                )
             else:
-                st.markdown(
-                    '<span style="color:#475569; font-size:0.85rem;">No external sources retrieved.</span>',
-                    unsafe_allow_html=True,
-                )
-
-        with right:
-            st.markdown(
-                '<div class="section-header">Confidence Score</div>', unsafe_allow_html=True
-            )
-            st.plotly_chart(
-                render_confidence_gauge(result["confidence"], label),
-                use_container_width=True,
-                config={"displayModeBar": False},
-            )
-
-            st.markdown(
-                '<div class="section-header" style="margin-top:0.5rem">Image Assessment</div>',
-                unsafe_allow_html=True,
-            )
-            _vlm_block = (result.get("vlm_caption") or "").strip()
-            _image_url = (result.get("image_url") or "").strip()
-
-            if result["image_mismatch"]:
-                _vlm_html = (
-                    _vlm_block.replace(chr(10), "<br>")
-                    if _vlm_block
-                    else "The article image does not match the described event context."
-                )
+                label = result["label"]
                 st.markdown(
                     f"""
-                <div class="img-mismatch-warning">
-                    ⚠️ <strong>Image Mismatch Detected</strong><br>
-                    <span style="font-size:0.82rem;">{_vlm_html}</span>
+                <div class="verdict-card verdict-{label}">
+                    <div style="margin-bottom:0.8rem">{render_verdict_badge(label)}</div>
+                    <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:0.8rem; font-style:italic;">
+                        "{_safe_html(result["claim_text"])}"
+                    </div>
+                    <div style="font-size:0.9rem; color:#cbd5e1; line-height:1.7;">
+                        {_safe_html(result["evidence_summary"])}
+                    </div>
                 </div>
                 """,
                     unsafe_allow_html=True,
                 )
-            elif _image_url:
-                if _vlm_block:
-                    _vlm_html = _vlm_block.replace(chr(10), "<br>")
+
+            # Verified sources — only shown for real verdicts
+            if not result.get("system_error") and not result.get("no_claims_found"):
+                st.markdown(
+                    '<div class="section-header" style="margin-top:1rem">Verified Sources</div>',
+                    unsafe_allow_html=True,
+                )
+                if result["sources"]:
+                    source_html = ""
+                    for src in result["sources"]:
+                        cred_color = "#10b981" if src["credibility"] > 0.7 else "#ef4444"
+                        source_html += f'<span class="source-pill">🔗 {_safe_html(src["name"])} <span style="color:{cred_color}; font-weight:600;">{src["credibility"]:.0%}</span></span>'
+                    st.markdown(source_html, unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        '<span style="color:#475569; font-size:0.85rem;">No external sources retrieved.</span>',
+                        unsafe_allow_html=True,
+                    )
+
+        with right:
+            if result.get("system_error") or result.get("no_claims_found"):
+                pass
+            else:
+                st.markdown(
+                    '<div class="section-header">Confidence Score</div>', unsafe_allow_html=True
+                )
+                st.plotly_chart(
+                    render_confidence_gauge(result["confidence"], label),
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                )
+
+                st.markdown(
+                    '<div class="section-header" style="margin-top:0.5rem">Image Assessment</div>',
+                    unsafe_allow_html=True,
+                )
+                _vlm_block = (result.get("vlm_caption") or "").strip()
+                _image_url = (result.get("image_url") or "").strip()
+
+                if result["image_mismatch"]:
+                    _vlm_html = (
+                        _safe_html(_vlm_block).replace(chr(10), "<br>")
+                        if _vlm_block
+                        else "The article image does not match the described event context."
+                    )
                     st.markdown(
                         f"""
-                    <div class="img-match-ok">
-                        ✓ <strong>Image Assessment</strong><br>
-                        <span style="font-size:0.82rem; color:#94a3b8; font-style:italic;">
-                            {_vlm_html}
-                        </span>
+                    <div class="img-mismatch-warning">
+                        ⚠️ <strong>Image Mismatch Detected</strong><br>
+                        <span style="font-size:0.82rem;">{_vlm_html}</span>
                     </div>
                     """,
                         unsafe_allow_html=True,
                     )
+                elif _image_url:
+                    if _vlm_block:
+                        _vlm_html = _safe_html(_vlm_block).replace(chr(10), "<br>")
+                        st.markdown(
+                            f"""
+                        <div class="img-match-ok">
+                            ✓ <strong>Image Assessment</strong><br>
+                            <span style="font-size:0.82rem; color:#94a3b8; font-style:italic;">
+                                {_vlm_html}
+                            </span>
+                        </div>
+                        """,
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            """
+                        <div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.25);
+                                    border-radius:10px; padding:0.8rem 1rem; font-size:0.82rem; color:#94a3b8;">
+                            🖼️ <strong style="color:#38bdf8;">Article image found</strong><br>
+                            Vision assessment is disabled or not available.
+                        </div>
+                        """,
+                            unsafe_allow_html=True,
+                        )
+                    st.image(_image_url, use_container_width=True)
                 else:
                     st.markdown(
                         """
-                    <div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.25);
-                                border-radius:10px; padding:0.8rem 1rem; font-size:0.82rem; color:#94a3b8;">
-                        🖼️ <strong style="color:#38bdf8;">Article image found</strong><br>
-                        Vision assessment is disabled or not available.
+                    <div style="background:rgba(71,85,105,0.15); border:1px solid rgba(71,85,105,0.3);
+                                border-radius:10px; padding:0.8rem 1rem; font-size:0.82rem; color:#64748b;">
+                        🖼️ <strong style="color:#94a3b8;">No image detected</strong><br>
+                        No image was found in this article — image assessment was skipped.
                     </div>
                     """,
                         unsafe_allow_html=True,
                     )
-                st.image(_image_url, use_container_width=True)
-            else:
-                st.markdown(
-                    """
-                <div style="background:rgba(71,85,105,0.15); border:1px solid rgba(71,85,105,0.3);
-                            border-radius:10px; padding:0.8rem 1rem; font-size:0.82rem; color:#64748b;">
-                    🖼️ <strong style="color:#94a3b8;">No image detected</strong><br>
-                    No image was found in this article — image assessment was skipped.
-                </div>
-                """,
-                    unsafe_allow_html=True,
-                )
 
         # ── Per-claim breakdown (only when the input decomposed into >1 claim) ──
         _sub_claims = result.get("claims") or []
@@ -1311,10 +1404,10 @@ if _cached_result and (run_btn or not run_btn):
                             </span>
                         </div>
                         <div style="font-size:0.85rem; color:#cbd5e1; font-style:italic; margin-bottom:0.5rem;">
-                            "{_sc_text}"
+                            "{_safe_html(_sc_text)}"
                         </div>
                         <div style="font-size:0.85rem; color:#94a3b8; line-height:1.6;">
-                            {_sc_reason}
+                            {_safe_html(_sc_reason)}
                         </div>
                     </div>
                     """,
@@ -1432,7 +1525,8 @@ if _cached_result and (run_btn or not run_btn):
                         else:
                             st.warning("Memory not available — correction not saved.")
                     except Exception as _fbe:
-                        st.error(f"Could not save correction: {_fbe}")
+                        logging.getLogger(__name__).error("HITL correction save failed", exc_info=True)
+                        st.error("Could not save your correction. Please try again.")
 
     # ─────────────────────
     # TAB 2: ENTITY & TREND
