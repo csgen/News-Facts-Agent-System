@@ -70,3 +70,45 @@ def test_compute_credibility_label_score_mapping(label, expected_range):
     score = compute_credibility_score(claims)
     lo, hi = expected_range
     assert lo <= score <= hi, f"{label}: expected [{lo}, {hi}], got {score:.4f}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# compute_sentiment_score
+#
+# Recency-weighted in [-1, +1]. SENTIMENT_MAP: positive=+1, neutral=0, negative=-1.
+# With days_ago=0 across all claims, weights are all 1.0 and score collapses to
+# the simple mean of label values — exact assertions are safe.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from agents.entity_tracker import compute_sentiment_score  # noqa: E402
+
+
+def _sent_claim(sentiment: str, days_ago: float = 0.0) -> dict:
+    return {
+        "sentiment": sentiment,
+        "verified_at": (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(),
+    }
+
+
+def test_compute_sentiment_empty_claims_returns_zero():
+    """No evidence → 0.0 (neutral)."""
+    assert compute_sentiment_score([]) == 0.0
+
+
+def test_compute_sentiment_all_positive_returns_plus_one():
+    """5 positive, no decay → mean = +1.0 exactly."""
+    score = compute_sentiment_score([_sent_claim("positive") for _ in range(5)])
+    assert score == 1.0
+
+
+def test_compute_sentiment_all_negative_returns_minus_one():
+    """5 negative, no decay → mean = -1.0 exactly."""
+    score = compute_sentiment_score([_sent_claim("negative") for _ in range(5)])
+    assert score == -1.0
+
+
+def test_compute_sentiment_mixed_returns_signed_mean():
+    """3 positive + 2 negative, no decay → (3*1 + 2*-1)/5 = 0.2."""
+    claims = [_sent_claim("positive") for _ in range(3)] + [_sent_claim("negative") for _ in range(2)]
+    score = compute_sentiment_score(claims)
+    assert score == pytest.approx(0.2, abs=1e-4)

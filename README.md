@@ -409,6 +409,9 @@ To run coverage locally inside your container:
 
 ```bash
 docker compose -f docker/docker-compose.yml run --rm shell
+# ruff check
+ruff check .
+# pytests
 pytest -m "not integration" \
   --cov=scraper_preprocessing_memory/src \
   --cov=FakeNewsAgent/fact_check_agent/src \
