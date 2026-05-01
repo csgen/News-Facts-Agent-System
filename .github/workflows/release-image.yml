@@ -107,14 +107,20 @@ jobs:
       chroma:
         image: chromadb/chroma:latest
         ports: ['8000:8000']
-        options: >-
-          --health-cmd "curl -fsS http://localhost:8000/api/v1/heartbeat || exit 1"
-          --health-interval 5s
-          --health-retries 30
-          --health-timeout 5s
+        # Intentionally NO --health-cmd here. chromadb/chroma:latest has no
+        # `curl` installed, and the heartbeat endpoint moved from /api/v1 to
+        # /api/v2 across versions, so any in-container healthcheck we write
+        # is brittle. We poll explicitly from the runner in the first step
+        # below (curl IS available on ubuntu-latest, and we can try both
+        # endpoint paths to stay version-agnostic).
 
     env:
-      IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+      # IMAGE is set dynamically below — Docker requires the repo path to be
+      # lowercase, but ${{ github.repository }} preserves the original case.
+      # If your repo is `Owner/My-Project`, the literal expansion would yield
+      # `ghcr.io/Owner/My-Project:sha-...` which `docker pull` rejects with
+      # "invalid reference format". So we compute it once via $GITHUB_ENV.
+
       # Shared by Smoke 2/3/4 — sidecar service hostnames are reachable from
       # the runner over `localhost` thanks to GitHub's automatic port forwarding.
       NEO4J_URI: bolt://localhost:7687
@@ -123,15 +129,56 @@ jobs:
       CHROMA_HOST: localhost
       CHROMA_PORT: '8000'
       OPENAI_API_KEY: dummy-not-used
-      GOOGLE_API_KEY: ''
+      # Non-empty dummy to avoid `genai.Client(api_key="")` raising in some
+      # google-genai SDK versions. No real call is ever made by the smokes.
+      GOOGLE_API_KEY: dummy-not-used
 
     steps:
+      - name: Compute image reference (lowercased + short SHA)
+        # Two transforms vs the literal ${{ github.repository }}:sha-${{ github.sha }}:
+        #   1. ${VAR,,}        — lowercase the repo path (Docker requires it)
+        #   2. ${GITHUB_SHA:0:7} — short SHA, matching docker/metadata-action's
+        #                          default `type=sha,prefix=sha-` behaviour
+        #                          (7 chars, not the full 40). Without this,
+        #                          docker pull fails with "manifest unknown".
+        # Writing to $GITHUB_ENV makes $IMAGE visible to every later step.
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+
+      - name: Wait for Chroma to be ready (heartbeat poll)
+        run: |
+          # Poll Chroma's heartbeat endpoint from the runner. Try v2 first
+          # (current Chroma), fall back to v1 (older images). We do this
+          # outside the container because `chromadb/chroma:latest` doesn't
+          # ship with curl and the API path is version-dependent.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/v2/heartbeat >/dev/null 2>&1 \
+               || curl -fsS http://localhost:8000/api/v1/heartbeat >/dev/null 2>&1; then
+              echo "Chroma is ready (after ${i} polls)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Chroma did not become ready within 120s"
+          docker ps --filter "ancestor=chromadb/chroma:latest" --format '{{.ID}}' \
+            | xargs -r -I{} docker logs --tail 50 {}
+          exit 1
+
       - name: Pull just-built image
         run: docker pull "$IMAGE"
 
       - name: Smoke 1 — imports work in the container
+        # Need the env vars forwarded even for the import-only check: importing
+        # `src.memory.agent` cascades to `from src.config import Settings`,
+        # which instantiates `settings = Settings()` at module load time.
+        # Pydantic's required fields (NEO4J_URI / NEO4J_PASSWORD / OPENAI_API_KEY)
+        # raise immediately if the env vars aren't present in the container —
+        # even if no actual DB connection is ever attempted by this step.
         run: |
-          docker run --rm "$IMAGE" python -c "
+          docker run --rm \
+            -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+            -e CHROMA_HOST -e CHROMA_PORT \
+            -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+            "$IMAGE" python -c "
           from src.memory.agent import MemoryAgent
           from agents.fact_check_agent import fact_check_claim
           from agents.memory_agent import get_memory
