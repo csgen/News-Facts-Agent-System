@@ -107,11 +107,12 @@ jobs:
       chroma:
         image: chromadb/chroma:latest
         ports: ['8000:8000']
-        options: >-
-          --health-cmd "curl -fsS http://localhost:8000/api/v1/heartbeat || exit 1"
-          --health-interval 5s
-          --health-retries 30
-          --health-timeout 5s
+        # Intentionally NO --health-cmd here. chromadb/chroma:latest has no
+        # `curl` installed, and the heartbeat endpoint moved from /api/v1 to
+        # /api/v2 across versions, so any in-container healthcheck we write
+        # is brittle. We poll explicitly from the runner in the first step
+        # below (curl IS available on ubuntu-latest, and we can try both
+        # endpoint paths to stay version-agnostic).
 
     env:
       IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
@@ -126,6 +127,25 @@ jobs:
       GOOGLE_API_KEY: ''
 
     steps:
+      - name: Wait for Chroma to be ready (heartbeat poll)
+        run: |
+          # Poll Chroma's heartbeat endpoint from the runner. Try v2 first
+          # (current Chroma), fall back to v1 (older images). We do this
+          # outside the container because `chromadb/chroma:latest` doesn't
+          # ship with curl and the API path is version-dependent.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/v2/heartbeat >/dev/null 2>&1 \
+               || curl -fsS http://localhost:8000/api/v1/heartbeat >/dev/null 2>&1; then
+              echo "Chroma is ready (after ${i} polls)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Chroma did not become ready within 120s"
+          docker ps --filter "ancestor=chromadb/chroma:latest" --format '{{.ID}}' \
+            | xargs -r -I{} docker logs --tail 50 {}
+          exit 1
+
       - name: Pull just-built image
         run: docker pull "$IMAGE"
 
