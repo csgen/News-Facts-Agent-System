@@ -204,19 +204,27 @@ class MemoryAgent:
         """Write a fact-check verdict to both databases.
 
         If an active verdict already exists for the same claim, mark it as
-        superseded before writing the new one. The full verdict history is
+        superseded AFTER writing the new one. The full verdict history is
         preserved in storage; only the latest active verdict is returned by
         get_verdict_by_claim.
-        """
-        # ── Supersede prior active verdict, if any ─────────────────────
-        existing = self._vector.get_verdict_by_claim(verdict.claim_id)
-        if existing.get("ids"):
-            old_id = existing["ids"][0]
-            if old_id != verdict.verdict_id:  # idempotency guard
-                self._vector.supersede_verdict(old_id, verdict.verdict_id)
-                self._graph.supersede_verdict(old_id, verdict.verdict_id)
 
-        # Get the claim text for combined embedding
+        Ordering matters: the Neo4j supersede query (GraphStore.supersede_verdict)
+        MATCHes both the old AND the new Verdict nodes before creating the
+        SUPERSEDED_BY edge between them. If we ran supersede before writing
+        the new verdict, the MATCH for the new node would bind zero rows and
+        the entire query would produce no result — silently leaving the edge
+        un-created (and old.status un-updated). So we identify the candidate
+        first, write the new verdict next, and supersede last.
+        """
+        # ── Phase 1: identify prior active verdict (if any) ────────────
+        existing = self._vector.get_verdict_by_claim(verdict.claim_id)
+        old_id_to_supersede = None
+        if existing.get("ids"):
+            candidate = existing["ids"][0]
+            if candidate != verdict.verdict_id:  # idempotency guard
+                old_id_to_supersede = candidate
+
+        # ── Phase 2: write the new verdict to both stores ──────────────
         claim_results = self._vector.get_claims_by_ids([verdict.claim_id])
         claim_text = ""
         if claim_results["documents"]:
@@ -245,6 +253,11 @@ class MemoryAgent:
             image_mismatch=verdict.image_mismatch,
             verified_at=verdict.verified_at,
         )
+
+        # ── Phase 3: now that both old and new exist, supersede ────────
+        if old_id_to_supersede:
+            self._vector.supersede_verdict(old_id_to_supersede, verdict.verdict_id)
+            self._graph.supersede_verdict(old_id_to_supersede, verdict.verdict_id)
 
     def add_credibility_snapshot(self, snapshot: CredibilitySnapshot) -> None:
         """Write a credibility snapshot to Graph DB."""
