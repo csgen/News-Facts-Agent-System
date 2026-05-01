@@ -1,3 +1,4 @@
+# ruff: noqa: I001  -- bootstrap must precede src.* imports; load order is intentional
 """MemoryAgent singleton for the Fact-Check Agent process.
 
 Creates one MemoryAgent instance per process and reuses it across all
@@ -14,7 +15,7 @@ Usage:
 
 import logging
 
-from fact_check_agent.src._bootstrap import *  # noqa: F401,F403 — must run first to add scraper_preprocessing_memory to sys.path
+import fact_check_agent.src._bootstrap  # noqa: F401 — adds scraper_preprocessing_memory to sys.path before src.* imports
 
 from src.config import settings as _memory_settings  # memory_agent settings
 from src.memory.agent import MemoryAgent  # memory_agent
