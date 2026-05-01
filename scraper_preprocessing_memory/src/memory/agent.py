@@ -374,6 +374,29 @@ class MemoryAgent:
         """Return unverified claims extracted after `since` (UTC datetime)."""
         return self._graph.get_unverified_claims_since(since)
 
+    def write_pipeline_failure(
+        self,
+        failure_id: str,
+        claim_id: str,
+        node_name: str,
+        failure_type: str,
+        raw_llm_response: str,
+        exception_type: str,
+        exception_message: str,
+        occurred_at: "datetime",
+    ) -> None:
+        """Persist a PipelineFailure node to Neo4j for post-mortem review."""
+        self._graph.write_pipeline_failure(
+            failure_id=failure_id,
+            claim_id=claim_id,
+            node_name=node_name,
+            failure_type=failure_type,
+            raw_llm_response=raw_llm_response,
+            exception_type=exception_type,
+            exception_message=exception_message,
+            occurred_at=occurred_at,
+        )
+
 
     def get_entity_context(self, claim_id: str) -> list[dict]:
         return self._graph.get_entity_context(claim_id)

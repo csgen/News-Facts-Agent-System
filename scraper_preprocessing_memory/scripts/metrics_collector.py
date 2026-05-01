@@ -52,6 +52,7 @@ NEO4J_LABELS = [
     "CredibilitySnapshot",
     "Prediction",
     "ScrapeRun",
+    "PipelineFailure",
 ]
 
 CHROMA_COLLECTIONS = [

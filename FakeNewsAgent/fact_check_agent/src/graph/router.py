@@ -27,7 +27,7 @@ def cache_hit_check(state: FactCheckState) -> str:
         dist = chunk.get("distance", 1.0)
         conf = chunk.get("verdict_confidence") or 0.0
         label = chunk.get("verdict_label")
-        if dist < _CACHE_EXACT_DISTANCE and conf >= _CACHE_MIN_CONFIDENCE and label:
+        if dist < _CACHE_EXACT_DISTANCE and conf >= _CACHE_MIN_CONFIDENCE and label and label != "misleading":
             return "hit"
     return "miss"
 

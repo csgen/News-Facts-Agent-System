@@ -33,17 +33,19 @@ class GraphStore:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Prediction) REQUIRE p.prediction_id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (t:Topic) REQUIRE t.name IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (sr:ScrapeRun) REQUIRE sr.run_id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (f:PipelineFailure) REQUIRE f.failure_id IS UNIQUE",
         ]
         indexes = [
             "CREATE INDEX IF NOT EXISTS FOR (c:Claim) ON (c.extracted_at)",
             "CREATE INDEX IF NOT EXISTS FOR (v:Verdict) ON (v.verified_at)",
             "CREATE INDEX IF NOT EXISTS FOR (p:Prediction) ON (p.deadline)",
             "CREATE INDEX IF NOT EXISTS FOR (sr:ScrapeRun) ON (sr.started_at)",
+            "CREATE INDEX IF NOT EXISTS FOR (f:PipelineFailure) ON (f.occurred_at)",
         ]
         with self._driver.session() as session:
             for stmt in constraints + indexes:
                 session.run(stmt)
-        logger.info("Neo4j schema initialized (10 constraints, 4 indexes)")
+        logger.info("Neo4j schema initialized (11 constraints, 5 indexes)")
 
     # ── Write: Sources ──────────────────────────────────────────────────
 
@@ -892,6 +894,44 @@ class GraphStore:
                 since=since.isoformat(),
             )
             return [dict(record) for record in result]
+
+    # ── Write: Pipeline Failures (called by Fact-Check Agent) ───────────
+
+    def write_pipeline_failure(
+        self,
+        failure_id: str,
+        claim_id: str,
+        node_name: str,
+        failure_type: str,
+        raw_llm_response: str,
+        exception_type: str,
+        exception_message: str,
+        occurred_at: "datetime",
+    ) -> None:
+        """Persist a PipelineFailure node for post-mortem review."""
+        with self._driver.session() as session:
+            session.run(
+                """
+                CREATE (f:PipelineFailure {
+                    failure_id:        $failure_id,
+                    claim_id:          $claim_id,
+                    node_name:         $node_name,
+                    failure_type:      $failure_type,
+                    raw_llm_response:  $raw_llm_response,
+                    exception_type:    $exception_type,
+                    exception_message: $exception_message,
+                    occurred_at:       datetime($occurred_at)
+                })
+                """,
+                failure_id=failure_id,
+                claim_id=claim_id,
+                node_name=node_name,
+                failure_type=failure_type,
+                raw_llm_response=raw_llm_response[:5000],
+                exception_type=exception_type,
+                exception_message=exception_message[:2000],
+                occurred_at=occurred_at.isoformat(),
+            )
 
     # ── Feature: Source Bias ────────────────────────────────────────────
 

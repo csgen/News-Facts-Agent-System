@@ -120,6 +120,30 @@
       ],
       "fieldConfig": {"defaults":{"unit":"s"}},
       "description": "Same metric, averaged. More stable than percentiles when traffic is sparse — the percentile panel artefacts at bucket boundaries with few observations."
+    },
+
+    { "type": "row", "title": "Pipeline Failures", "gridPos": {"h":1,"w":24,"x":0,"y":44}, "collapsed": false, "panels": [] },
+
+    {
+      "id": 16, "type": "timeseries", "title": "Failure rate by type (per minute)",
+      "gridPos": {"h":8,"w":12,"x":0,"y":45},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"sum by (failure_type) (rate(nfs_pipeline_failures_total[5m])) * 60","legendFormat":"{{failure_type}}","refId":"A"}
+      ],
+      "fieldConfig": {"defaults":{"unit":"short"}},
+      "description": "Rate of fact-check pipeline failures broken down by type: llm_api_error, json_parse_error, tavily_error, pydantic_error, db_error."
+    },
+
+    {
+      "id": 17, "type": "stat", "title": "Total PipelineFailure nodes (all time)",
+      "gridPos": {"h":8,"w":12,"x":12,"y":45},
+      "datasource": {"type":"prometheus","uid":"prometheus"},
+      "targets": [
+        {"expr":"nfs_db_node_count{store=\"neo4j\",label=\"PipelineFailure\"}","refId":"A"}
+      ],
+      "options": {"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"background","graphMode":"none"},
+      "description": "Total PipelineFailure nodes in Neo4j. Query each node for claim_id, node_name, raw_llm_response, and exception_message for post-mortem review."
     }
 
   ],

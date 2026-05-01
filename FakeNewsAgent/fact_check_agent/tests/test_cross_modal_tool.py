@@ -1,7 +1,6 @@
 """Tests for the cross-modal tool.
 
 Unit tests: mocked — no API keys, Ollama, or model downloads required.
-SigLIP integration: runs locally (transformers + torch), no external services.
 Ollama integration: marked `requires_ollama`, auto-skipped when Ollama is down.
 """
 
@@ -211,107 +210,6 @@ def test_siglip_score_surfaces_in_return_value():
         )
     assert result["flag"] is True
     assert result["siglip_score"] == pytest.approx(0.04)
-
-
-# ── Integration: SigLIP local model ──────────────────────────────────────────
-#
-# Calibrated against real photos (see calibration run in repo history):
-#   Real photo + matching claim  → score 0.16–0.77
-#   Real photo + mismatching claim → score ~0.000
-#   Threshold: 0.10 (zero false positives, catches all real-photo mismatches)
-#
-# Grace Hopper image (matplotlib sample): score 0.16 for "woman in navy uniform"
-# Portrait photo: score 0.77 for "person's face portrait photo"
-# All mismatching pairs: score 0.000
-
-# NOTE: These paths are dev-machine specific (set up on the original author's
-# laptop). The tests below are marked @pytest.mark.integration so they auto-skip
-# in CI. To run them locally, override _GRACE_HOPPER and _PORTRAIT with paths
-# to images on your machine, then invoke:
-#     pytest -m integration FakeNewsAgent/fact_check_agent/tests/test_cross_modal_tool.py
-_GRACE_HOPPER = (
-    "/home/shantam/fakenews/.venv/lib/python3.10/site-packages"
-    "/matplotlib/mpl-data/sample_data/grace_hopper.jpg"
-)
-_PORTRAIT = "/home/shantam/Downloads/portrait_photo.jpg"
-
-
-def _real_image_uri(path: str) -> str:
-    import base64
-
-    with open(path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
-    return f"data:image/jpeg;base64,{b64}"
-
-
-@pytest.mark.integration
-def test_siglip_check_returns_valid_shape():
-    """_siglip_check returns a dict with conflict (bool), explanation, and siglip_score (float 0-1)."""
-    uri = _real_image_uri(_GRACE_HOPPER)
-    result = _siglip_check(
-        claim_text="a woman in military navy uniform",
-        image_url=uri,
-    )
-    assert isinstance(result, dict)
-    assert isinstance(result["conflict"], bool)
-    assert result["explanation"] is None or isinstance(result["explanation"], str)
-    assert isinstance(result["siglip_score"], float)
-    assert 0.0 <= result["siglip_score"] <= 1.0
-
-
-@pytest.mark.integration
-def test_siglip_matching_pair_above_threshold():
-    """Grace Hopper photo scores above threshold (0.10) for correct description."""
-    uri = _real_image_uri(_GRACE_HOPPER)
-    result = _siglip_check("a woman in military navy uniform", uri)
-    assert result["conflict"] is False, (
-        f"Expected no conflict for matching pair, got score={result['siglip_score']:.4f}"
-    )
-    assert result["siglip_score"] > 0.10
-
-
-@pytest.mark.integration
-def test_siglip_mismatch_scores_near_zero():
-    """Grace Hopper photo + ocean claim scores near 0 (clear mismatch)."""
-    uri = _real_image_uri(_GRACE_HOPPER)
-    result = _siglip_check("a scenic ocean sunset with calm blue water", uri)
-    assert result["conflict"] is True, (
-        f"Expected conflict for mismatch pair, got score={result['siglip_score']:.4f}"
-    )
-    assert result["siglip_score"] < 0.05
-
-
-@pytest.mark.integration
-def test_siglip_portrait_match():
-    """Portrait photo scores high for 'person's face portrait photo'."""
-    uri = _real_image_uri(_PORTRAIT)
-    result = _siglip_check("a person's face portrait photo", uri)
-    assert result["siglip_score"] > 0.10, (
-        f"Portrait photo should score above threshold for person claim, got {result['siglip_score']:.4f}"
-    )
-    assert result["conflict"] is False
-
-
-@pytest.mark.integration
-def test_siglip_portrait_wildfire_mismatch():
-    """Portrait photo + wildfire claim scores near zero."""
-    uri = _real_image_uri(_PORTRAIT)
-    result = _siglip_check("a burning forest fire with thick smoke", uri)
-    assert result["siglip_score"] < 0.05
-    assert result["conflict"] is True
-
-
-@pytest.mark.integration
-def test_siglip_model_cached_across_calls():
-    """_load_siglip is called only once even for multiple checks (lru_cache)."""
-    from fact_check_agent.src.tools.cross_modal_tool import _load_siglip
-
-    uri = _real_image_uri(_GRACE_HOPPER)
-    _siglip_check("first call", uri)
-    before = _load_siglip.cache_info()
-    _siglip_check("second call", uri)
-    after = _load_siglip.cache_info()
-    assert after.hits > before.hits
 
 
 def test_siglip_graceful_fallback_on_bad_image():

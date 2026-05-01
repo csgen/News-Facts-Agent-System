@@ -25,6 +25,7 @@ import re
 from typing import Optional
 
 import fact_check_agent.src.llm_factory as _llm_factory
+from fact_check_agent.src.failure_logger import log_failure
 from fact_check_agent.src.prompts import (
     CONTEXT_COVERAGE_PROMPT,
     QUESTION_GENERATION_PROMPT,
@@ -223,8 +224,10 @@ def run(
 
     context_claims: list[dict] = []
 
-    # Always include fresh memory claims
+    # Always include fresh memory claims — skip misleading verdicts (ambiguous signal)
     for claim in fresh_context:
+        if claim.get("verdict_label") == "misleading":
+            continue
         context_claims.append(
             {
                 "type": "memory",
@@ -321,6 +324,13 @@ def run(
                         )
             except Exception as exc:
                 logger.warning("Tavily search failed for %r: %s", q, exc)
+                log_failure(
+                    memory=None,
+                    claim_id="",
+                    node_name="context_claim_agent",
+                    failure_type="tavily_error",
+                    exception=exc,
+                )
 
     # ── Context optimisation ─────────────────────────────────────────────────
     # Memory claims: top 5 by prior confidence.
