@@ -36,10 +36,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-try:
-    from src.models.verdict import Verdict
-except ImportError:
-    Verdict = None  # resolved at runtime via sys.path bootstrap in fact_check_agent.py
+from src.models.verdict import Verdict  # noqa: E402 — bootstrap ensures path is set
 
 _ALPHA = 0.05  # agent verdict credibility learning rate
 _ALPHA_HITL = 0.08  # HITL correction learning rate (human signal weighted higher)

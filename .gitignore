@@ -40,6 +40,13 @@ docker/data/
 *.log
 *.pkl
 results/
+logs/
+
+# ── Security audit / probe scripts (non-production tooling) ──────────────────
+scripts/*ssrf*
+scripts/*xss*
+scripts/*injection*
+security_report.md
 
 # ── Jupyter ──────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/

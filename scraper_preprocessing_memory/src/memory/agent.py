@@ -256,8 +256,14 @@ class MemoryAgent:
 
         # ── Phase 3: now that both old and new exist, supersede ────────
         if old_id_to_supersede:
-            self._vector.supersede_verdict(old_id_to_supersede, verdict.verdict_id)
-            self._graph.supersede_verdict(old_id_to_supersede, verdict.verdict_id)
+            try:
+                self._vector.supersede_verdict(old_id_to_supersede, verdict.verdict_id)
+            except Exception as exc:
+                logger.warning("Vector supersede_verdict failed (non-fatal): %s", exc)
+            try:
+                self._graph.supersede_verdict(old_id_to_supersede, verdict.verdict_id)
+            except Exception as exc:
+                logger.warning("Graph supersede_verdict failed (non-fatal): %s", exc)
 
     def add_credibility_snapshot(self, snapshot: CredibilitySnapshot) -> None:
         """Write a credibility snapshot to Graph DB."""

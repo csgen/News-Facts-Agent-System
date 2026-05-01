@@ -152,6 +152,9 @@ jobs:
           EMBEDDING_DIM:   1536
           LLM_MODEL:       gpt-4o-mini
           VISION_MODEL:    gpt-4o
+
+          # ── Pipeline caps ────────────────────────────────
+          FACT_CHECK_MAX_CLAIMS: ${{ vars.FACT_CHECK_MAX_CLAIMS || '10' }}
         run: |
           echo "Starting fact-check pipeline at $(date -u)"
           python fact_check_pipeline.py --lookback-hours 24
