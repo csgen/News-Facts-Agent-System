@@ -41,20 +41,58 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def neo4j_container():
-    """Spin up a real Neo4j 5-community container for the duration of the module."""
+    """Spin up a real Neo4j 5-community container for the duration of the module.
+
+    Use the documented `password=` constructor kwarg rather than the
+    `.with_env("NEO4J_AUTH", …)` chain — the chain is unreliable across
+    testcontainers-python versions (the Neo4jContainer constructor injects
+    its own NEO4J_AUTH based on the `password` attribute, and depending on
+    call order our override can get clobbered, leaving the container with
+    the default password while we try to connect with a different one).
+    """
     from testcontainers.neo4j import Neo4jContainer
 
-    with Neo4jContainer("neo4j:5-community").with_env("NEO4J_AUTH", "neo4j/testpassword") as n:
-        # Sanity-wait: testcontainers' verify is fast, but Neo4j needs a few extra
-        # seconds before its first session works.
-        yield n
+    container = Neo4jContainer("neo4j:5-community", password="testpassword")
+    container.start()
+    try:
+        yield container
+    finally:
+        container.stop()
+
+
+def _wait_for_chroma_heartbeat(host: str, port: int, timeout: int = 90) -> None:
+    """Poll Chroma's heartbeat endpoint until it returns HTTP 200, or fail.
+
+    More reliable than log-matching: Chroma's startup banner has changed
+    between versions, but the heartbeat endpoint is part of the public API
+    and stable. Tries the v2 path first (current), falls back to v1 (older
+    images), so the same fixture works against `chromadb/chroma:latest`
+    regardless of which major version is published.
+    """
+    import time
+    import urllib.request
+
+    deadline = time.time() + timeout
+    last_err: Exception | None = None
+    while time.time() < deadline:
+        for path in ("/api/v2/heartbeat", "/api/v1/heartbeat"):
+            try:
+                with urllib.request.urlopen(f"http://{host}:{port}{path}", timeout=2) as r:
+                    if r.status == 200:
+                        return
+            except Exception as e:  # noqa: BLE001 — broad on purpose; we want to keep polling
+                last_err = e
+        time.sleep(1)
+    raise TimeoutError(
+        f"Chroma container at {host}:{port} did not become ready within {timeout}s "
+        f"(last error: {last_err!r})"
+    )
 
 
 @pytest.fixture(scope="module")
 def chroma_container():
     """Spin up a real chromadb/chroma container exposing port 8000."""
     from testcontainers.core.container import DockerContainer
-    from testcontainers.core.waiting_utils import wait_for_logs
 
     c = (
         DockerContainer("chromadb/chroma:latest")
@@ -63,7 +101,9 @@ def chroma_container():
     )
     c.start()
     try:
-        wait_for_logs(c, "Application startup complete", timeout=60)
+        host = c.get_container_host_ip()
+        port = int(c.get_exposed_port(8000))
+        _wait_for_chroma_heartbeat(host, port, timeout=90)
         yield c
     finally:
         c.stop()
@@ -77,9 +117,11 @@ def memory_agent(neo4j_container, chroma_container, monkeypatch):
     clean schema (init_schema is idempotent; collections are cleared at end).
     """
     # Pydantic Settings reads from env. Set everything required.
+    # Read Neo4j credentials off the container itself so we can never drift
+    # between what the container booted with and what MemoryAgent connects with.
     monkeypatch.setenv("NEO4J_URI", neo4j_container.get_connection_url())
-    monkeypatch.setenv("NEO4J_USER", "neo4j")
-    monkeypatch.setenv("NEO4J_PASSWORD", "testpassword")
+    monkeypatch.setenv("NEO4J_USER", getattr(neo4j_container, "username", "neo4j"))
+    monkeypatch.setenv("NEO4J_PASSWORD", getattr(neo4j_container, "password", "testpassword"))
     monkeypatch.setenv("CHROMA_HOST", "localhost")
     monkeypatch.setenv("CHROMA_PORT", str(chroma_container.get_exposed_port(8000)))
     monkeypatch.setenv("CHROMA_API_KEY", "")
@@ -103,36 +145,90 @@ def memory_agent(neo4j_container, chroma_container, monkeypatch):
     # or it will pollute the next test. In particular, ingesting the same
     # `sample_preprocessing_output` twice trips check_content_hash_exists in
     # Chroma — even after Neo4j is wiped — and silently breaks dedup tests.
+    #
+    # Each subsystem's cleanup lives in its OWN try/except so one failure
+    # never poisons the rest. (An earlier version put everything under one
+    # try and had a tuple of attribute-accesses; if any attribute didn't exist
+    # the tuple-build raised before the for-loop even started, leaving Chroma
+    # entirely uncleaned. Iterating attribute NAMES with getattr() avoids that
+    # whole class of bug.)
     try:
-        # Neo4j: nuke all nodes + edges.
         with m._graph._driver.session() as s:
             s.run("MATCH (n) DETACH DELETE n")
-        # Chroma: each collection is reset by deleting every item it holds.
-        # We walk the same five collections VectorStore creates in __init__.
-        for coll in (
-            m._vector._claims,
-            m._vector._articles,
-            m._vector._verdicts,
-            m._vector._image_captions,
-            m._vector._source_credibility,
-        ):
+    except Exception:
+        pass
+
+    for coll_name in (
+        "_claims",
+        "_articles",
+        "_verdicts",
+        "_image_captions",
+        "_source_credibility",  # only present on some VectorStore versions
+    ):
+        coll = getattr(m._vector, coll_name, None)
+        if coll is None:
+            continue
+        try:
             ids = coll.get().get("ids", [])
             if ids:
                 coll.delete(ids=ids)
-    except Exception:
-        # Best-effort — never let cleanup mask a real test failure.
-        pass
+        except Exception:
+            pass
+
     m.close()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _gemini_embedding_response(dim: int = 1536) -> httpx.Response:
-    """Canned Gemini embedding response — single 1536-dim vector of 0.1s."""
+def _gemini_batch_embed_handler(request: httpx.Request) -> httpx.Response:
+    """Canned Gemini :batchEmbedContents response, sized to the request.
+
+    The google-genai SDK ALWAYS uses the batch endpoint — `embed(text)` calls
+    `embed_batch([text])` internally (see embeddings.py:55-57). Per Google's
+    REST contract for :batchEmbedContents, the request body is
+        {"requests": [{"model": ..., "content": ...}, ...]}
+    and the response must be
+        {"embeddings": [{"values": [...]}, ...]}
+    with the embeddings list the SAME LENGTH as the requests list. A static
+    `return_value=` mock with one embedding fails for batches of N>1 because
+    the caller does `[emb.values for emb in response.embeddings]` and then
+    indexes by position.
+    """
+    import json
+
+    raw = request.content or b""
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="ignore")
+    try:
+        body = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        body = {}
+    items = body.get("requests") or []
+    # Defensive: never return zero embeddings, that would surprise the caller
+    # in confusing ways. Mirror N=1 minimum.
+    n = max(len(items), 1)
     return httpx.Response(
         200,
-        json={"embedding": {"values": [0.1] * dim}},
+        json={"embeddings": [{"values": [0.1] * 1536} for _ in range(n)]},
     )
+
+
+def _pass_through_local_traffic() -> None:
+    """Tell respx to let httpx calls to the testcontainer hosts hit the network.
+
+    respx in strict mode (`@respx.mock`) intercepts ALL httpx calls and raises
+    on anything not registered. ChromaDB's HttpClient uses httpx, so its calls
+    to the testcontainer would be blocked. Adding a `pass_through()` route for
+    localhost lets those traverse normally while everything we explicitly mock
+    (Gemini, OpenAI, Tavily) still returns canned responses.
+
+    `respx.mock(assert_all_mocked=False)` is NOT enough — it just stops
+    raising; unmatched requests still get an empty 200 response from respx,
+    which makes Chroma's orjson parser blow up with "zero-length, empty
+    document".
+    """
+    respx.route(host="localhost").pass_through()
+    respx.route(host="127.0.0.1").pass_through()
 
 
 def _openai_chat_response(content: str) -> httpx.Response:
@@ -156,10 +252,11 @@ def _openai_chat_response(content: str) -> httpx.Response:
 @respx.mock
 def test_ingest_preprocessed_lands_in_both_stores(memory_agent, sample_preprocessing_output):
     """End-to-end ingest path: PreprocessingOutput → Neo4j nodes + Chroma rows."""
-    # Mock Gemini embedding endpoint — every call returns the same canned vector.
-    respx.post(url__regex=r"https://generativelanguage\.googleapis\.com/.*embedContent.*").mock(
-        return_value=_gemini_embedding_response()
-    )
+    # Let testcontainer DB calls reach the real network; mock only the LLM endpoint.
+    _pass_through_local_traffic()
+    respx.post(
+        url__regex=r"https://generativelanguage\.googleapis\.com/.*:batchEmbedContents.*"
+    ).mock(side_effect=_gemini_batch_embed_handler)
 
     ok = memory_agent.ingest_preprocessed(sample_preprocessing_output)
     assert ok is True
@@ -189,9 +286,10 @@ def test_ingest_preprocessed_lands_in_both_stores(memory_agent, sample_preproces
 @respx.mock
 def test_check_duplicate_short_circuits_repeat_ingest(memory_agent, sample_preprocessing_output):
     """Re-ingesting the same article (same content_hash) should be a no-op."""
-    respx.post(url__regex=r"https://generativelanguage\.googleapis\.com/.*embedContent.*").mock(
-        return_value=_gemini_embedding_response()
-    )
+    _pass_through_local_traffic()
+    respx.post(
+        url__regex=r"https://generativelanguage\.googleapis\.com/.*:batchEmbedContents.*"
+    ).mock(side_effect=_gemini_batch_embed_handler)
 
     first = memory_agent.ingest_preprocessed(sample_preprocessing_output)
     second = memory_agent.ingest_preprocessed(sample_preprocessing_output)
@@ -208,9 +306,10 @@ def test_check_duplicate_short_circuits_repeat_ingest(memory_agent, sample_prepr
 @respx.mock
 def test_search_similar_claims_returns_ingested_claim(memory_agent, sample_preprocessing_output):
     """After ingest, the same claim text should round-trip through similarity search."""
-    respx.post(url__regex=r"https://generativelanguage\.googleapis\.com/.*embedContent.*").mock(
-        return_value=_gemini_embedding_response()
-    )
+    _pass_through_local_traffic()
+    respx.post(
+        url__regex=r"https://generativelanguage\.googleapis\.com/.*:batchEmbedContents.*"
+    ).mock(side_effect=_gemini_batch_embed_handler)
 
     memory_agent.ingest_preprocessed(sample_preprocessing_output)
     results = memory_agent.search_similar_claims(
@@ -226,9 +325,10 @@ def test_add_verdict_supersedes_existing_active_verdict(memory_agent, sample_pre
     """Writing a second verdict for the same claim marks the first as superseded."""
     from src.models.verdict import Verdict
 
-    respx.post(url__regex=r"https://generativelanguage\.googleapis\.com/.*embedContent.*").mock(
-        return_value=_gemini_embedding_response()
-    )
+    _pass_through_local_traffic()
+    respx.post(
+        url__regex=r"https://generativelanguage\.googleapis\.com/.*:batchEmbedContents.*"
+    ).mock(side_effect=_gemini_batch_embed_handler)
 
     memory_agent.ingest_preprocessed(sample_preprocessing_output)
     claim_id = sample_preprocessing_output.claims[0].claim_id
