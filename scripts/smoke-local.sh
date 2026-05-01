@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # Run the same smoke checks as `.github/workflows/release-image.yml` does in CI,
-# but against a locally-built image and locally-spun-up Neo4j + Chroma sidecars.
+# but against a local image and locally-spun-up Neo4j + Chroma sidecars.
 #
 # Usage:
-#   bash scripts/smoke-local.sh
+#   bash scripts/smoke-local.sh                    # default: reuse existing image, build only if missing
+#   bash scripts/smoke-local.sh --rebuild          # force a fresh build (use after editing Dockerfile / requirements.txt)
+#   IMAGE=ghcr.io/<owner>/news_facts_system:latest bash scripts/smoke-local.sh   # smoke an arbitrary image
 #
 # Prerequisites:
 #   - Docker Desktop (or Docker engine on Linux) running
 #   - curl available on PATH (Git Bash on Windows has it; Mac/Linux do too)
 #
 # What it does:
-#   1. Builds the image as `news_facts_system:smoke` from your local Dockerfile
+#   1. Builds the image as `news_facts_system:smoke` IF it doesn't already exist
+#      (override with --rebuild). Skipping the build saves ~5 minutes on
+#      every run when neither the Dockerfile nor requirements.txt has changed.
 #   2. Starts Neo4j 5-community + Chroma:latest on a dedicated `smoke-net`
 #      Docker network (so they can talk to the test container by hostname)
 #   3. Waits for both DBs to be ready (heartbeat / cypher-shell poll)
@@ -25,7 +29,24 @@
 
 set -euo pipefail
 
-IMAGE="news_facts_system:smoke"
+# Allow override: `IMAGE=foo bash smoke-local.sh` to point at any image.
+IMAGE="${IMAGE:-news_facts_system:smoke}"
+
+# Parse args. Only one flag for now: --rebuild.
+REBUILD=0
+for arg in "$@"; do
+    case "$arg" in
+        --rebuild) REBUILD=1 ;;
+        -h|--help)
+            sed -n '2,30p' "$0"
+            exit 0
+            ;;
+        *)
+            echo "Unknown arg: $arg (use --help)"
+            exit 2
+            ;;
+    esac
+done
 NET="smoke-net"
 NEO4J="smoke-neo4j"
 CHROMA="smoke-chroma"
@@ -50,11 +71,17 @@ trap cleanup EXIT
 # Ensure a clean starting state in case a previous run died mid-way.
 cleanup
 
-# ── 1. Build ─────────────────────────────────────────────────────────────────
-echo -e "${B}=== Building $IMAGE ===${N}"
-# `--load` ensures the image lands in the local Docker daemon (only needed if
-# you've configured a custom buildx context; harmless otherwise).
-docker build -t "$IMAGE" -f docker/Dockerfile .
+# ── 1. Build (only if the image is missing, or --rebuild was passed) ─────────
+# `docker image inspect` returns 0 if the image exists locally, non-zero otherwise.
+if [[ "$REBUILD" -eq 1 ]]; then
+    echo -e "${B}=== Rebuilding $IMAGE (--rebuild) ===${N}"
+    docker build -t "$IMAGE" -f docker/Dockerfile .
+elif docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo -e "${D}=== Reusing existing image $IMAGE (pass --rebuild to force a fresh build) ===${N}"
+else
+    echo -e "${B}=== Image $IMAGE not found locally — building ===${N}"
+    docker build -t "$IMAGE" -f docker/Dockerfile .
+fi
 
 # ── 2. Start sidecars ────────────────────────────────────────────────────────
 echo -e "${B}=== Starting Neo4j + Chroma sidecars ===${N}"
