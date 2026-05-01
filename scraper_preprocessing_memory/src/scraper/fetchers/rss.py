@@ -35,9 +35,9 @@ class RSSFetcher(BaseFetcher):
     def __init__(self, feeds: list[dict] | None = None):
         self._feeds = feeds or DEFAULT_FEEDS
 
-    def fetch(self, max_results: int = 20) -> list[RawArticle]:
+    def fetch(self, max_results: int = 10) -> list[RawArticle]:
         articles: list[RawArticle] = []
-        per_feed = max(max_results // len(self._feeds), 5)
+        per_feed = max(max_results // len(self._feeds), 3)
 
         for feed_config in self._feeds:
             try:

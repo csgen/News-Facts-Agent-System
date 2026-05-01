@@ -19,7 +19,7 @@ class TavilyFetcher(BaseFetcher):
         self._api_key = api_key
         self._query = query
 
-    def fetch(self, max_results: int = 20) -> list[RawArticle]:
+    def fetch(self, max_results: int = 10) -> list[RawArticle]:
         articles: list[RawArticle] = []
 
         try:
