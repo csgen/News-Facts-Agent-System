@@ -128,8 +128,31 @@ def query_memory(state: FactCheckState, memory: "MemoryAgent", settings=None) ->
     inp = state["input"]
 
     # ── Stage 1: vector similarity search ────────────────────────────────
-    vector_results = retrieve_similar_claims(inp.claim_text, memory)
-    entity_ctx = memory.get_entity_context(inp.claim_id)
+    try:
+        vector_results = retrieve_similar_claims(inp.claim_text, memory)
+    except Exception as exc:
+        logger.warning("query_memory: vector search failed — proceeding without memory context: %s", exc)
+        log_failure(
+            memory=memory,
+            claim_id=inp.claim_id,
+            node_name="query_memory",
+            failure_type="db_error",
+            exception=exc,
+        )
+        vector_results = []
+
+    try:
+        entity_ctx = memory.get_entity_context(inp.claim_id)
+    except Exception as exc:
+        logger.warning("query_memory: entity context lookup failed: %s", exc)
+        log_failure(
+            memory=memory,
+            claim_id=inp.claim_id,
+            node_name="query_memory",
+            failure_type="db_error",
+            exception=exc,
+        )
+        entity_ctx = []
 
     # ── Stage 2: GraphRAG — expand via entity-claim traversal ────────────
     graph_results: list[dict] = []
