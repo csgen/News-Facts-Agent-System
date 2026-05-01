@@ -350,7 +350,7 @@ Workflows live under `.github/workflows/`:
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | every PR + push to main | Lint + unit + mocked-integration tests + coverage |
+| `ci.yml` | every PR + push to main | Three parallel jobs: lint, unit tests, mocked-integration tests + coverage |
 | `release-image.yml` | push to main + tag `v*` | Build & publish Docker image, then smoke-test it |
 | `release.yml` | tag `v*` only | Generate changelog, create GitHub Release |
 | `scrape.yml` | twice daily cron + manual | Run scraper pipeline against cloud DBs |
@@ -367,17 +367,25 @@ The test pyramid running across these workflows:
 
 (The unit + mocked-integration tiers run in the same CI job; a single `pytest -m "not integration"` invocation includes both because `mocked_integration` isn't excluded by that filter.)
 
-### `ci.yml` — Lint + unit tests + mocked-integration + coverage
+### `ci.yml` — Three parallel jobs: lint, unit tests, mocked-integration
 
-Runs on every push and PR to `main`, plus on manual trigger:
-- `lint` job: `ruff check .` (ruleset configured in `pyproject.toml`)
-- `test` job: installs deps + spaCy model, runs `pytest -m "not integration" --cov=...` which includes both **unit** and **mocked-integration** tests; measures line coverage
+Runs on every push and PR to `main`, plus on manual trigger. Three independent jobs run in parallel on separate runners:
+
+| Job | What it does | Runtime |
+|---|---|---|
+| `lint` | `ruff check .` (ruleset in `pyproject.toml`) | ~30 s |
+| `test` | `pytest -m "not integration and not mocked_integration"` — pure unit tests with mocked deps; uploads `coverage.xml` | ~3 min |
+| `mocked-integration` | `pytest -m "mocked_integration"` — testcontainers Neo4j + Chroma + respx-mocked LLM HTTP; uploads `coverage-mocked.xml` | ~5 min |
+
+Total wall-clock = max of the three (~5 min) instead of sum (~9 min). Fast lint/unit feedback shows in the Actions tab within ~1 min, regardless of how long the mocked-integration job takes.
 
 The `@pytest.mark.mocked_integration` tests use:
 - `respx` to mock OpenAI / Gemini / Tavily HTTP calls (already in `requirements.txt`)
 - `testcontainers` to spin up real Neo4j + Chroma sidecars in the runner
 
 Tests that hit live external services should be tagged `@pytest.mark.integration` and run only via the `health-check.yml` workflow.
+
+**Coverage upload** — both test jobs upload coverage XML to Codecov with distinct flags (`unit` and `mocked-integration`), so the Codecov UI shows per-tier coverage breakdown.
 
 #### Test coverage
 
