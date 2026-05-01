@@ -115,7 +115,12 @@ jobs:
         # endpoint paths to stay version-agnostic).
 
     env:
-      IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+      # IMAGE is set dynamically below — Docker requires the repo path to be
+      # lowercase, but ${{ github.repository }} preserves the original case.
+      # If your repo is `Owner/My-Project`, the literal expansion would yield
+      # `ghcr.io/Owner/My-Project:sha-...` which `docker pull` rejects with
+      # "invalid reference format". So we compute it once via $GITHUB_ENV.
+
       # Shared by Smoke 2/3/4 — sidecar service hostnames are reachable from
       # the runner over `localhost` thanks to GitHub's automatic port forwarding.
       NEO4J_URI: bolt://localhost:7687
@@ -127,6 +132,12 @@ jobs:
       GOOGLE_API_KEY: ''
 
     steps:
+      - name: Compute lowercase image name
+        # `${VAR,,}` is bash parameter expansion that lowercases the value.
+        # Writing to $GITHUB_ENV makes the variable visible to all later
+        # steps as `$IMAGE`, exactly as if we'd set it at the job level.
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}" >> "$GITHUB_ENV"
+
       - name: Wait for Chroma to be ready (heartbeat poll)
         run: |
           # Poll Chroma's heartbeat endpoint from the runner. Try v2 first
