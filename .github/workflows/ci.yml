@@ -1,8 +1,16 @@
-# Continuous Integration: lint + unit tests on every push and PR.
+# Continuous Integration: three parallel jobs on every push and PR.
 #
-# Runs only NON-integration tests (i.e. anything not marked @pytest.mark.integration
-# and any test that isn't auto-skipped via @pytest.mark.skipif on missing API keys).
-# Integration tests live in the separate scrape.yml + (future) integration.yml.
+#   lint                — ruff (~30 s, no deps install)
+#   test                — pure unit tests, mocked deps, no Docker (~3 min)
+#   mocked-integration  — testcontainers Neo4j + Chroma + respx-mocked LLM (~5 min)
+#
+# Splitting unit and mocked-integration into separate jobs gives:
+#   - Fast green/red feedback for unit failures (~1 min instead of ~5)
+#   - Independent failure signals on the Actions tab
+#   - Parallelism — total wall-clock = max(lint, test, mocked-integration), not sum
+#
+# Live-API integration tests (anything tagged @pytest.mark.integration) live
+# in health-check.yml — those need real cloud credentials and run on a cron.
 
 name: CI
 
@@ -38,7 +46,10 @@ jobs:
       - name: Lint
         run: ruff check .
 
-  # ── 2. Unit tests (skip integration / live-API tests) ─────────────────────
+  # ── 2. Pure unit tests (no Docker, no live services) ─────────────────────
+  # Filter excludes BOTH the integration marker (live cloud APIs) AND the
+  # mocked_integration marker (testcontainers Neo4j + Chroma). Result: only
+  # truly-unit tests run here, finishing in ~30s after setup.
   test:
     name: Unit tests (Python 3.12)
     runs-on: ubuntu-latest
@@ -78,12 +89,9 @@ jobs:
           CHROMA_HOST:      ""
           TAVILY_API_KEY:   ""
         run: |
-          # `-m "not integration"` skips tests marked @pytest.mark.integration.
-          # Tests marked @pytest.mark.skipif(not OPENAI_API_KEY) etc. auto-skip
-          # because the env vars above are placeholders / blank.
-          # --cov scoped to our three subfolders so we don't measure coverage
-          # of stdlib / third-party deps. Term report shows %; XML upload-able.
-          pytest -m "not integration" -v --tb=short \
+          # Exclude BOTH live-API tests (`integration`) AND testcontainer-backed
+          # tests (`mocked_integration`). The latter live in their own job below.
+          pytest -m "not integration and not mocked_integration" -v --tb=short \
             --cov=scraper_preprocessing_memory/src \
             --cov=FakeNewsAgent/fact_check_agent/src \
             --cov=PredictionAgent/agents \
@@ -97,10 +105,84 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           retention-days: 14
-      
+
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml
+          flags: unit             # so codecov can show per-tier coverage
+          fail_ci_if_error: false
+
+  # ── 3. Mocked-integration tests (testcontainers + respx) ──────────────────
+  # Spins up real Neo4j + Chroma containers via testcontainers; mocks LLM /
+  # search HTTP calls via respx. Runs in parallel with `test` so a slow
+  # container start doesn't delay unit-test feedback.
+  #
+  # Needs Docker available on the runner — GitHub-hosted ubuntu-latest has it
+  # pre-installed, so no extra setup required.
+  mocked-integration:
+    name: Mocked-integration tests (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.12 with pip cache
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install system build deps (for spaCy + lxml)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential gcc
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download spaCy model
+        run: python -m spacy download en_core_web_sm
+
+      - name: Run mocked-integration tests with coverage
+        env:
+          # Same placeholders as the unit job — testcontainers + the test
+          # fixture override these via monkeypatch.setenv at test time, but
+          # `from src.config import settings` runs at import time and needs
+          # something present.
+          NEO4J_URI:        "bolt://localhost:7687"
+          NEO4J_USER:       "neo4j"
+          NEO4J_PASSWORD:   "test_unused"
+          OPENAI_API_KEY:   "sk-test-unused"
+          GOOGLE_API_KEY:   ""
+          CHROMA_API_KEY:   ""
+          CHROMA_HOST:      ""
+          TAVILY_API_KEY:   ""
+        run: |
+          # Run ONLY mocked-integration tests; exclude live-API ones.
+          pytest -m "mocked_integration" -v --tb=short \
+            --cov=scraper_preprocessing_memory/src \
+            --cov=FakeNewsAgent/fact_check_agent/src \
+            --cov=PredictionAgent/agents \
+            --cov-report=term \
+            --cov-report=xml:coverage-mocked.xml
+
+      - name: Upload coverage report (artifact, 14-day retention)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-mocked-xml
+          path: coverage-mocked.xml
+          retention-days: 14
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage-mocked.xml
+          flags: mocked-integration   # per-tier flag in codecov UI
           fail_ci_if_error: false

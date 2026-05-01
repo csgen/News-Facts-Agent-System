@@ -142,7 +142,7 @@
       "targets": [
         {"expr":"nfs_db_node_count{store=\"neo4j\",label=\"PipelineFailure\"}","refId":"A"}
       ],
-      "options": {"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"background","graphMode":"none"},
+      "options": {"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"value","graphMode":"area"},
       "description": "Total PipelineFailure nodes in Neo4j. Query each node for claim_id, node_name, raw_llm_response, and exception_message for post-mortem review."
     }
 

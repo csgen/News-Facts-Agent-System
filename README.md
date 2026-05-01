@@ -346,15 +346,47 @@ MATCH (s:ScrapeRun) RETURN s ORDER BY s.started_at DESC LIMIT 20
 
 ## CI/CD (GitHub Actions)
 
-Two workflows live under `.github/workflows/`:
+Workflows live under `.github/workflows/`:
 
-### `ci.yml` — Lint + unit tests + coverage
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `ci.yml` | every PR + push to main | Three parallel jobs: lint, unit tests, mocked-integration tests + coverage |
+| `smoke-pr.yml` | PRs touching image-affecting files | Build image locally + run 4 smoke checks (no GHCR push) |
+| `release-image.yml` | push to main + tag `v*` | Build & publish Docker image to GHCR, then smoke-test the published image |
+| `release.yml` | tag `v*` only | Generate changelog, create GitHub Release |
+| `scrape.yml` | twice daily cron + manual | Run scraper pipeline against cloud DBs |
+| `health-check.yml` | Mon + Thu cron + manual | Probe live OpenAI / Gemini / Tavily / Neo4j / Chroma APIs |
 
-Runs on every push and PR to `main`, plus on manual trigger:
-- `lint` job: `ruff check .` (ruleset configured in `pyproject.toml`)
-- `test` job: installs deps + spaCy model, runs `pytest -m "not integration" --cov=...` (skips live-API tests, measures line coverage)
+The test pyramid running across these workflows:
 
-Tests that hit OpenAI / Neo4j / Tavily either carry `@pytest.mark.skipif(not OPENAI_API_KEY, …)` (auto-skip in CI) or should be tagged `@pytest.mark.integration` (excluded from the default run).
+| Tier | Where | What it tests | Cost |
+|---|---|---|---|
+| **Unit + lint** | `ci.yml`, every PR | Pure-logic functions, mocked deps | Free, ~3 min |
+| **Mocked-integration** | `ci.yml`, every PR | Real Neo4j + Chroma sidecars; OpenAI/Gemini/Tavily mocked at HTTP layer (respx) | Free, ~3-5 min |
+| **Smoke** | `release-image.yml` `smoke` job, post-merge | Just-built image actually boots: imports, schema, round-trip, Streamlit health endpoint | Free, ~3 min |
+| **Health check** | `health-check.yml`, twice weekly | Tiny real-API pings to detect vendor drift / quota / auth issues | ~$0.05/run, $0.50/month |
+
+(The unit + mocked-integration tiers run in the same CI job; a single `pytest -m "not integration"` invocation includes both because `mocked_integration` isn't excluded by that filter.)
+
+### `ci.yml` — Three parallel jobs: lint, unit tests, mocked-integration
+
+Runs on every push and PR to `main`, plus on manual trigger. Three independent jobs run in parallel on separate runners:
+
+| Job | What it does | Runtime |
+|---|---|---|
+| `lint` | `ruff check .` (ruleset in `pyproject.toml`) | ~30 s |
+| `test` | `pytest -m "not integration and not mocked_integration"` — pure unit tests with mocked deps; uploads `coverage.xml` | ~3 min |
+| `mocked-integration` | `pytest -m "mocked_integration"` — testcontainers Neo4j + Chroma + respx-mocked LLM HTTP; uploads `coverage-mocked.xml` | ~5 min |
+
+Total wall-clock = max of the three (~5 min) instead of sum (~9 min). Fast lint/unit feedback shows in the Actions tab within ~1 min, regardless of how long the mocked-integration job takes.
+
+The `@pytest.mark.mocked_integration` tests use:
+- `respx` to mock OpenAI / Gemini / Tavily HTTP calls (already in `requirements.txt`)
+- `testcontainers` to spin up real Neo4j + Chroma sidecars in the runner
+
+Tests that hit live external services should be tagged `@pytest.mark.integration` and run only via the `health-check.yml` workflow.
+
+**Coverage upload** — both test jobs upload coverage XML to Codecov with distinct flags (`unit` and `mocked-integration`), so the Codecov UI shows per-tier coverage breakdown.
 
 #### Test coverage
 
@@ -395,7 +427,7 @@ pytest -m "not integration" --cov=PredictionAgent/agents --cov-report=html
 
 ### `scrape.yml` — Scheduled scraper
 
-Runs the scraper pipeline against cloud DBs every 6 hours (cron `0 */6 * * *`), and on manual trigger. Each run:
+Runs the scraper pipeline against cloud DBs twice a day (cron `0 6,18 * * *`), and on manual trigger. Each run:
 1. Spins up an Ubuntu runner
 2. Installs deps + spaCy
 3. Runs `python -m src.pipeline` from `scraper_preprocessing_memory/`
@@ -403,6 +435,50 @@ Runs the scraper pipeline against cloud DBs every 6 hours (cron `0 */6 * * *`), 
 5. Runner exits — no state kept between runs
 
 The pipeline deduplicates by content hash, so missed runs / retries are safe.
+
+### `health-check.yml` — Live API probes (Mon + Thu)
+
+Twice-weekly probes verify the external services we depend on still answer correctly:
+- OpenAI — 1-token chat completion
+- Gemini — 1 short embedding (must still emit 1536-dim)
+- Tavily — minimal search query
+- Neo4j Aura — `RETURN 1` connectivity check
+- ChromaDB Cloud — `list_collections()` auth check
+
+Each probe is wrapped in `@pytest.mark.skipif(not os.getenv("..."))` so a missing secret skips just that probe rather than failing the whole workflow. When a probe fails (e.g. quota exceeded, key revoked, vendor changed response shape), GitHub auto-emails the workflow owner.
+
+Cost: ~$0.05 per run × 2 runs/week ≈ $0.50/month.
+
+### `release-image.yml` — Build, publish, smoke-test the image
+
+Every push to `main` (and every tag push) does three things in two parallel jobs:
+1. **`build-and-push`** — builds the Dockerfile, computes tags via `docker/metadata-action` (`:latest`, `:sha-<short>`, `:vX.Y.Z` on tags), pushes to GHCR.
+2. **`smoke`** (depends on the above) — pulls the just-published image, spins up sidecar Neo4j + Chroma containers in the runner, then runs four checks:
+   - **Smoke 1: imports** — `from src.memory.agent import MemoryAgent; from agents.fact_check_agent import fact_check_claim` etc., proving the container's PYTHONPATH is wired correctly
+   - **Smoke 2: schema init** — `MemoryAgent.init_schema()` against sidecar Neo4j
+   - **Smoke 3: round-trip write/read** — create a test entity, look it up by name
+   - **Smoke 4: Streamlit boot** — start `streamlit run frontend/app.py`, poll `http://localhost:8501/_stcore/health` until it answers
+
+If any smoke step fails, the image is published but the failure is loud (red workflow check + email). The bad image keeps its `:sha-…` tag for forensic reference.
+
+### `smoke-pr.yml` — Smoke test on PR (no push)
+
+Same four smoke checks as `release-image.yml`, but runs on **PRs** against a locally-built image. Lets you catch image-level breakage before merging instead of after.
+
+Triggers on PRs that touch:
+- `docker/Dockerfile`
+- `requirements.txt`
+- Any source under `scraper_preprocessing_memory/`, `FakeNewsAgent/`, `PredictionAgent/`
+- `.github/workflows/smoke-pr.yml` itself
+
+Path-filtered so PRs that only edit `tests/`, `README.md`, or other non-image files don't burn 5–10 min of runner time on a smoke run.
+
+Differences from `release-image.yml`:
+- Builds locally with `docker/build-push-action`'s `load: true, push: false` — image lives only in the runner's Docker daemon, never reaches GHCR
+- Reuses the GitHub Actions cache (`type=gha`) that `release-image.yml` warmed on `main` — most PRs only invalidate the `COPY` layers, so dep installation stays cached
+- Single job (build + smoke in the same runner) — no inter-job artifact passing needed since we don't push
+
+The 4 smoke checks themselves are identical: imports → schema init → round-trip write/read → Streamlit health. A pass on PR means the merge will also pass `release-image.yml`'s smoke; the post-merge run becomes a pure "publish + final verification" rather than a discovery moment.
 
 ### Required GitHub Secrets
 
