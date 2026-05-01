@@ -129,7 +129,9 @@ jobs:
       CHROMA_HOST: localhost
       CHROMA_PORT: '8000'
       OPENAI_API_KEY: dummy-not-used
-      GOOGLE_API_KEY: ''
+      # Non-empty dummy to avoid `genai.Client(api_key="")` raising in some
+      # google-genai SDK versions. No real call is ever made by the smokes.
+      GOOGLE_API_KEY: dummy-not-used
 
     steps:
       - name: Compute image reference (lowercased + short SHA)
@@ -165,8 +167,18 @@ jobs:
         run: docker pull "$IMAGE"
 
       - name: Smoke 1 — imports work in the container
+        # Need the env vars forwarded even for the import-only check: importing
+        # `src.memory.agent` cascades to `from src.config import Settings`,
+        # which instantiates `settings = Settings()` at module load time.
+        # Pydantic's required fields (NEO4J_URI / NEO4J_PASSWORD / OPENAI_API_KEY)
+        # raise immediately if the env vars aren't present in the container —
+        # even if no actual DB connection is ever attempted by this step.
         run: |
-          docker run --rm "$IMAGE" python -c "
+          docker run --rm \
+            -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+            -e CHROMA_HOST -e CHROMA_PORT \
+            -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+            "$IMAGE" python -c "
           from src.memory.agent import MemoryAgent
           from agents.fact_check_agent import fact_check_claim
           from agents.memory_agent import get_memory

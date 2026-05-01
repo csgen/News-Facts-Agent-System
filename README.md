@@ -351,7 +351,8 @@ Workflows live under `.github/workflows/`:
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `ci.yml` | every PR + push to main | Three parallel jobs: lint, unit tests, mocked-integration tests + coverage |
-| `release-image.yml` | push to main + tag `v*` | Build & publish Docker image, then smoke-test it |
+| `smoke-pr.yml` | PRs touching image-affecting files | Build image locally + run 4 smoke checks (no GHCR push) |
+| `release-image.yml` | push to main + tag `v*` | Build & publish Docker image to GHCR, then smoke-test the published image |
 | `release.yml` | tag `v*` only | Generate changelog, create GitHub Release |
 | `scrape.yml` | twice daily cron + manual | Run scraper pipeline against cloud DBs |
 | `health-check.yml` | Mon + Thu cron + manual | Probe live OpenAI / Gemini / Tavily / Neo4j / Chroma APIs |
@@ -459,6 +460,25 @@ Every push to `main` (and every tag push) does three things in two parallel jobs
    - **Smoke 4: Streamlit boot** — start `streamlit run frontend/app.py`, poll `http://localhost:8501/_stcore/health` until it answers
 
 If any smoke step fails, the image is published but the failure is loud (red workflow check + email). The bad image keeps its `:sha-…` tag for forensic reference.
+
+### `smoke-pr.yml` — Smoke test on PR (no push)
+
+Same four smoke checks as `release-image.yml`, but runs on **PRs** against a locally-built image. Lets you catch image-level breakage before merging instead of after.
+
+Triggers on PRs that touch:
+- `docker/Dockerfile`
+- `requirements.txt`
+- Any source under `scraper_preprocessing_memory/`, `FakeNewsAgent/`, `PredictionAgent/`
+- `.github/workflows/smoke-pr.yml` itself
+
+Path-filtered so PRs that only edit `tests/`, `README.md`, or other non-image files don't burn 5–10 min of runner time on a smoke run.
+
+Differences from `release-image.yml`:
+- Builds locally with `docker/build-push-action`'s `load: true, push: false` — image lives only in the runner's Docker daemon, never reaches GHCR
+- Reuses the GitHub Actions cache (`type=gha`) that `release-image.yml` warmed on `main` — most PRs only invalidate the `COPY` layers, so dep installation stays cached
+- Single job (build + smoke in the same runner) — no inter-job artifact passing needed since we don't push
+
+The 4 smoke checks themselves are identical: imports → schema init → round-trip write/read → Streamlit health. A pass on PR means the merge will also pass `release-image.yml`'s smoke; the post-merge run becomes a pure "publish + final verification" rather than a discovery moment.
 
 ### Required GitHub Secrets
 
