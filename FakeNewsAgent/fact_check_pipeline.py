@@ -6,23 +6,27 @@ pipeline, and writes the resulting verdict back to Neo4j + ChromaDB.
 
 Usage (from FakeNewsAgent/):
     python fact_check_pipeline.py
-    python fact_check_pipeline.py --lookback-hours 48 --sleep-between 3.0
+    python fact_check_pipeline.py --lookback-hours 48 --sleep-between 3.0 --max-claims 10
 
 GitHub Actions runs this as a second step after the scraper, with a default
-lookback of 24 h to cover the daily scrape window.
+lookback of 24 h and caps claims via the FACT_CHECK_MAX_CLAIMS repo variable
+(default 10).
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
-from fact_check_agent.src.graph.graph import build_graph
-
-# _bootstrap wires scraper_preprocessing_memory onto sys.path
+# ruff: noqa: I001 — bootstrap must precede graph import
+# _bootstrap wires scraper_preprocessing_memory onto sys.path — must precede
+# graph import so that reflection_agent's Verdict import resolves correctly.
 from fact_check_agent.src.memory_client import close_memory, get_memory
+
+from fact_check_agent.src.graph.graph import build_graph
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput
 
 logging.basicConfig(
@@ -34,6 +38,7 @@ pipeline_logger = logging.getLogger("pipeline")
 
 _DEFAULT_LOOKBACK_HOURS = 24
 _DEFAULT_SLEEP_BETWEEN_S = 2.0
+_DEFAULT_MAX_CLAIMS = 10
 
 
 def _build_input(row: dict) -> FactCheckInput:
@@ -68,19 +73,34 @@ def _build_input(row: dict) -> FactCheckInput:
     )
 
 
-def run(lookback_hours: int = _DEFAULT_LOOKBACK_HOURS, sleep_between: float = _DEFAULT_SLEEP_BETWEEN_S) -> dict:
+def run(
+    lookback_hours: int = _DEFAULT_LOOKBACK_HOURS,
+    sleep_between: float = _DEFAULT_SLEEP_BETWEEN_S,
+    max_claims: int = _DEFAULT_MAX_CLAIMS,
+) -> dict:
     since = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     logger.info(
-        "Fact-check pipeline starting — lookback %dh (since %s UTC)",
+        "Fact-check pipeline starting — lookback %dh (since %s UTC), max %d claims",
         lookback_hours,
         since.strftime("%Y-%m-%d %H:%M"),
+        max_claims,
     )
 
     memory = get_memory()
     graph = build_graph(memory)
 
     claims = memory.get_unverified_claims_since(since)
-    logger.info("Found %d unverified claims to process", len(claims))
+    total_found = len(claims)
+
+    if len(claims) > max_claims:
+        logger.info(
+            "Capping to %d claims out of %d found (set FACT_CHECK_MAX_CLAIMS to adjust)",
+            max_claims,
+            total_found,
+        )
+        claims = claims[:max_claims]
+
+    logger.info("Will process %d claims", len(claims))
 
     processed = 0
     failed = 0
@@ -115,7 +135,7 @@ def run(lookback_hours: int = _DEFAULT_LOOKBACK_HOURS, sleep_between: float = _D
 
     close_memory()
 
-    summary = {"found": len(claims), "processed": processed, "failed": failed}
+    summary = {"found": total_found, "processed": processed, "failed": failed}
     logger.info("Fact-check pipeline complete: %s", summary)
     return summary
 
@@ -134,8 +154,18 @@ def main():
         default=_DEFAULT_SLEEP_BETWEEN_S,
         help="Seconds to sleep between claims to avoid rate limits (default: 2.0)",
     )
+    parser.add_argument(
+        "--max-claims",
+        type=int,
+        default=int(os.environ.get("FACT_CHECK_MAX_CLAIMS", str(_DEFAULT_MAX_CLAIMS))),
+        help="Max claims to verify per run (env: FACT_CHECK_MAX_CLAIMS, default: 10)",
+    )
     args = parser.parse_args()
-    run(lookback_hours=args.lookback_hours, sleep_between=args.sleep_between)
+    run(
+        lookback_hours=args.lookback_hours,
+        sleep_between=args.sleep_between,
+        max_claims=args.max_claims,
+    )
 
 
 if __name__ == "__main__":
