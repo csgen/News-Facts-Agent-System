@@ -128,6 +128,17 @@ def run(
             processed += 1
         except Exception as exc:
             logger.error("claim_id=%s failed: %s", claim_id, exc)
+            try:
+                from fact_check_agent.src.failure_logger import log_failure
+                log_failure(
+                    memory=memory,
+                    claim_id=claim_id,
+                    node_name="pipeline.graph_invoke",
+                    failure_type="api_error",
+                    exception=exc,
+                )
+            except Exception:
+                pass  # failure logging is best-effort — never disrupt the pipeline
             failed += 1
 
         if i < len(claims) - 1:

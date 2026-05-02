@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     embedding_provider: str = "openai"  # changing to "ollama" requires re-seeding ChromaDB
 
     # Ollama settings (only used when *_provider = "ollama")
-    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_base_url: str = "https://ollama.com/v1"
     ollama_api_key: str = ""  # leave blank for local Ollama; set for Ollama Cloud
     ollama_llm_model: str = "gemma4:31b-cloud"
     ollama_embedding_model: str = "nomic-embed-text"

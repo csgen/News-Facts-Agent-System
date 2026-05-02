@@ -27,6 +27,20 @@ from src.models.verdict import Verdict
 
 logger = logging.getLogger(__name__)
 
+# ── Pre-write content size caps (R3) ─────────────────────────────────────────
+_MAX_CLAIM_TEXT = 5_000       # chars — matches input guardrail upper bound
+_MAX_EVIDENCE_TEXT = 10_000   # chars — reasoning/evidence_summary fields
+
+
+def _trunc(text: str, max_len: int) -> str:
+    """Truncate text to max_len and log if trimmed."""
+    if not isinstance(text, str):
+        return ""
+    if len(text) > max_len:
+        logger.warning("DB write: text truncated from %d to %d chars", len(text), max_len)
+        return text[:max_len]
+    return text
+
 
 class MemoryAgent:
     def __init__(self, settings: Settings):
@@ -233,10 +247,11 @@ class MemoryAgent:
         combined_text = f"{claim_text} [verdict: {verdict.label}]"
         embedding = self._embeddings.embed(combined_text)
 
+        safe_evidence = _trunc(verdict.evidence_summary, _MAX_EVIDENCE_TEXT)
         self._vector.upsert_verdict(
             verdict_id=verdict.verdict_id,
             embedding=embedding,
-            document=verdict.evidence_summary,
+            document=safe_evidence,
             claim_id=verdict.claim_id,
             label=verdict.label,
             confidence=verdict.confidence,
@@ -249,7 +264,7 @@ class MemoryAgent:
             claim_id=verdict.claim_id,
             label=verdict.label,
             confidence=verdict.confidence,
-            evidence_summary=verdict.evidence_summary,
+            evidence_summary=safe_evidence,
             image_mismatch=verdict.image_mismatch,
             verified_at=verdict.verified_at,
         )
@@ -563,6 +578,10 @@ class MemoryAgent:
         Called after every frontend fact-check so entities are tracked
         even when claims come directly from the UI (no preprocessing pipeline).
         """
+        claim_text = _trunc(claim_text, _MAX_CLAIM_TEXT)
+        if not claim_text:
+            logger.warning("auto_store_claim_with_entities: empty claim_text for %s — skipped", claim_id)
+            return
         try:
             embedding = self._embeddings.embed(claim_text)
             self._vector.upsert_claim(

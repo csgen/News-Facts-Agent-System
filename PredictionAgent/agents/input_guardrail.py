@@ -36,10 +36,23 @@ _log_dir = Path(__file__).parent.parent / "logs"
 _log_dir.mkdir(exist_ok=True)
 _blocked_logger = logging.getLogger("guardrail.agent.blocked")
 if not _blocked_logger.handlers:
-    _fh = logging.FileHandler(_log_dir / "guardrail_blocked.log")
-    _fh.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
-    _blocked_logger.addHandler(_fh)
+    try:
+        _fh = logging.FileHandler(_log_dir / "guardrail_blocked.log")
+        _fh.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
+        _blocked_logger.addHandler(_fh)
+    except OSError:
+        # Log file not writable (e.g. owned by a different user in CI).
+        # Fall back to stderr so blocked events are still surfaced.
+        _blocked_logger.addHandler(logging.StreamHandler())
 _blocked_logger.setLevel(logging.WARNING)
+
+# ── Layer B circuit breaker ─────────────────────────────────────────────────
+# If Layer B fails (OpenAI error) _LAYER_B_FAILURE_THRESHOLD times in a row,
+# the circuit trips and every subsequent input is blocked until the process
+# restarts. This prevents fail-open behaviour under sustained API outages.
+_LAYER_B_FAILURE_THRESHOLD = 3
+_layer_b_failure_count: int = 0
+_layer_b_tripped: bool = False
 
 # ─────────────────────────────────────────────
 # LAYER A — RULE-BASED PATTERNS
@@ -196,6 +209,12 @@ User input: {input}"""
 
 def layer_b_check(text: str) -> dict:
     """LLM-based classification. Only called if Layer A passes."""
+    global _layer_b_failure_count, _layer_b_tripped
+
+    if _layer_b_tripped:
+        logger.error("[guardrail.B] Circuit tripped — blocking input until process restart")
+        return {"blocked": True, "reason": "Safety check unavailable — all inputs blocked", "layer": "B", "risk": "HIGH"}
+
     try:
         import os
 
@@ -251,11 +270,22 @@ def layer_b_check(text: str) -> dict:
         else:
             print("[guardrail.B] PASS")
 
+        _layer_b_failure_count = 0  # successful call resets the circuit
         return {"blocked": blocked, "reason": reason, "layer": "B", "risk": risk}
 
     except Exception as e:
-        logger.warning("[guardrail.B] LLM check failed, defaulting to PASS: %s", e)
-        print(f"[guardrail.B] ERROR (defaulting to PASS): {e}")
+        _layer_b_failure_count += 1
+        logger.warning(
+            "[guardrail.B] LLM check failed (%d/%d): %s",
+            _layer_b_failure_count, _LAYER_B_FAILURE_THRESHOLD, e,
+        )
+        if _layer_b_failure_count >= _LAYER_B_FAILURE_THRESHOLD:
+            _layer_b_tripped = True
+            logger.error(
+                "[guardrail.B] Circuit tripped after %d consecutive failures — blocking all inputs",
+                _layer_b_failure_count,
+            )
+            return {"blocked": True, "reason": "Safety check unavailable — all inputs blocked", "layer": "B", "risk": "HIGH"}
         return {"blocked": False, "reason": "", "layer": None, "risk": "NONE"}
 
 

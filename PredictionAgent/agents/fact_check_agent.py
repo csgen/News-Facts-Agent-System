@@ -32,6 +32,7 @@ for _p in (str(_SCAPPER), str(_SCAPPER / "src"), str(_REPO_ROOT / "FakeNewsAgent
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from fact_check_agent.src.failure_logger import log_failure
 from fact_check_agent.src.llm_factory import get_langfuse_handler
 from fact_check_agent.src.models.schemas import EntityRef, FactCheckInput, FactCheckOutput
 from src.id_utils import make_id
@@ -137,12 +138,30 @@ def run_fact_check(output: PreprocessingOutput) -> list[FactCheckOutput]:
     for i in range(len(output.claims)):
         fc_input = _claim_to_input(output, i, image_caption, image_url)
         lf = get_langfuse_handler()
-        state = graph.invoke({"input": fc_input}, config={"callbacks": [lf]} if lf else {})
+        try:
+            state = graph.invoke({"input": fc_input}, config={"callbacks": [lf]} if lf else {})
+        except Exception as _e:
+            logger.exception("graph.invoke failed for claim %s", fc_input.claim_id)
+            log_failure(
+                memory=memory,
+                claim_id=fc_input.claim_id,
+                node_name="fact_check_agent.graph_invoke",
+                failure_type="llm_api_error",
+                exception=_e,
+            )
+            continue
         fc_output: Optional[FactCheckOutput] = state.get("output")
         if fc_output:
             results.append(fc_output)
         else:
             logger.error("Graph returned no output for claim %s", fc_input.claim_id)
+            log_failure(
+                memory=memory,
+                claim_id=fc_input.claim_id,
+                node_name="fact_check_agent.no_output",
+                failure_type="api_error",
+                exception=RuntimeError("graph returned no output"),
+            )
 
     return results
 
@@ -249,6 +268,13 @@ def run_fact_check_by_claim_ids(claim_ids: list[str]) -> list[FactCheckOutput]:
         except Exception as _e:
             _LLM_ERRORS.labels(provider="openai").inc()
             logger.exception("graph.invoke failed for claim %s", claim_id)
+            log_failure(
+                memory=memory,
+                claim_id=claim_id,
+                node_name="fact_check_agent.graph_invoke",
+                failure_type="llm_api_error",
+                exception=_e,
+            )
             continue
         fc_output: Optional[FactCheckOutput] = state.get("output")
         if fc_output:
@@ -256,6 +282,13 @@ def run_fact_check_by_claim_ids(claim_ids: list[str]) -> list[FactCheckOutput]:
             results.append(fc_output)
         else:
             logger.error("Graph returned no output for claim %s", claim_id)
+            log_failure(
+                memory=memory,
+                claim_id=claim_id,
+                node_name="fact_check_agent.no_output",
+                failure_type="api_error",
+                exception=RuntimeError("graph returned no output"),
+            )
 
     return results
 

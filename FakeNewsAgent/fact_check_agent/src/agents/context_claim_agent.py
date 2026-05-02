@@ -37,6 +37,43 @@ logger = logging.getLogger(__name__)
 _MAX_MEMORY_CLAIMS = 5       # top-N prior verified claims passed to verdict synthesis
 _MAX_CLAIMS_PER_QUESTION = 2  # top-N Tavily results kept per question
 
+# ── Tavily snippet injection guard (Layer A) ──────────────────────────────────
+# Mirrors the patterns in decompose.py. Applied per-snippet before content
+# reaches _summarise_search so a poisoned Tavily result cannot hijack the
+# LLM's evidence summarisation step.
+
+_SNIPPET_INJECTION_PATTERNS = [
+    r"ignore\s+(previous|all|above|prior)\s+instructions?",
+    r"disregard\s+(previous|all|above|prior)\s+instructions?",
+    r"forget\s+(previous|all|above|prior)\s+instructions?",
+    r"override\s+(previous|all|above|prior)\s+instructions?",
+    r"do\s+not\s+follow\s+(previous|your)\s+instructions?",
+    r"\bDAN\b",
+    r"you\s+are\s+now\s+(a\s+)?(?!fact)",
+    r"act\s+as\s+(if\s+you\s+are|a)\s+(?!fact)",
+    r"pretend\s+(to\s+be|you\s+are)\s+(?!fact)",
+    r"roleplay\s+as",
+    r"jailbreak",
+    r"(show|print|repeat|reveal|leak)\s+(me\s+)?(your\s+)?(system\s+prompt|instructions?|prompt)",
+    r"###\s*(instruction|system|human|assistant)",
+    r"\[INST\]",
+    r"<\|im_start\|>",
+    r"<\|system\|>",
+]
+
+
+def _is_safe_snippet(text: str) -> bool:
+    """Return False if text contains a prompt injection pattern."""
+    sample = text[:2000].lower()
+    for pattern in _SNIPPET_INJECTION_PATTERNS:
+        if re.search(pattern, sample, re.IGNORECASE):
+            logger.warning(
+                "Tavily snippet blocked by content guard — pattern %r matched in %r",
+                pattern, text[:80],
+            )
+            return False
+    return True
+
 
 # ── Step 1: question generation ───────────────────────────────────────────────
 
@@ -306,6 +343,8 @@ def run(
                     url = result.get("url", "")
                     title = result.get("title", "")
                     src_text = f"Source: {title}\nURL: {url}\n\n{content}"
+                    if not _is_safe_snippet(src_text):
+                        continue
                     extracted = _summarise_search(q, claim_text, src_text, model, client)
                     if extracted:
                         context_claims.append(
