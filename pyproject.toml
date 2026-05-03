@@ -37,3 +37,61 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["F401", "F811"]   # tests can shadow / import-for-side-effects
 "**/__init__.py" = ["F401"]        # re-exports are intentional
+
+# ─────────────────────────────────────────────────────────────────────────────
+# deptry — static dependency check.
+# Walks every .py file with AST, extracts imports, and fails CI if any
+# import is missing from requirements.txt (rule DEP001). Catches the class
+# of bug where someone adds `import foo` without adding `foo` to deps.
+#
+# Scope is intentionally narrow: we only enforce DEP001 (missing) — DEP002
+# (unused) and DEP003 (transitive) would block CI on pre-existing repo state
+# unrelated to this gate. Re-enable later if the repo is cleaned up.
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.deptry]
+# extend_exclude entries are regex matched against the relative path with
+# re.match (anchored at the start of the path). Use `.*<segment>.*` to match
+# a folder anywhere in the tree (notebooks/, benchmark/ etc. are nested
+# under FakeNewsAgent/, PredictionAgent/, ...).
+extend_exclude = [
+    ".*notebooks.*",       # exploratory .ipynb — not part of the runtime image
+    ".*data.*",            # runtime artefacts
+    ".*build.*",
+    ".*dist.*",
+    ".*\\.venv.*",
+    ".*venv.*",
+    # benchmark/ and evaluation/ pull in opt-in scientific deps (datasets,
+    # matplotlib) that aren't in the core runtime requirements. They run
+    # outside CI; excluding them keeps the gate focused on production code.
+    ".*benchmark.*",
+    ".*evaluation.*",
+]
+# Suppress unused-dep / transitive-dep checks. We're only here to catch the
+# missing-import-but-not-in-requirements.txt class of bug.
+ignore = ["DEP002", "DEP003"]
+# First-party namespaces. They resolve at runtime via PYTHONPATH wiring in
+# docker/Dockerfile and per-package conftest.py — deptry can't see that, so
+# tell it explicitly to avoid DEP001 false positives on internal modules.
+known_first_party = [
+    "agents",
+    "src",
+    "frontend",
+    "fact_check_agent",
+    "scraper_preprocessing_memory",
+    "FakeNewsAgent",
+    "PredictionAgent",
+    # Flat imports under scraper_preprocessing_memory/src/ — that folder is
+    # on PYTHONPATH (see docker/Dockerfile line 38), so `from id_utils ...`
+    # resolves at runtime even though there's no top-level package.
+    "id_utils",
+    "models",
+    "config",
+    "scripts",
+]
+
+# NOTE: no [tool.deptry.package_module_name_map] is needed.
+# The CI lint job installs the full requirements.txt before running deptry,
+# so deptry introspects each installed package's metadata to learn its
+# import name (Pillow→PIL, python-dotenv→dotenv, scikit-learn→sklearn, ...)
+# automatically. Add a map entry here ONLY if a future package's metadata
+# is broken and deptry can't infer the import name even when installed.
