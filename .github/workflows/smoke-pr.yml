@@ -153,6 +153,43 @@ jobs:
           print('ROUND-TRIP OK')
           "
 
+      - name: Smoke 3.5 — frontend module imports
+        # Streamlit's /_stcore/health endpoint (Smoke 4 below) returns 200 as
+        # soon as the web server binds — BEFORE the user script's imports are
+        # evaluated. So a missing-from-requirements.txt import in app.py won't
+        # fail Smoke 4. This step closes that gap by AST-walking app.py and
+        # importing each top-level module inside the container.
+        #
+        # We intentionally avoid `python -c "import frontend.app"` because
+        # importing app.py runs module-level side effects (st.set_page_config,
+        # log-file handlers, prometheus server bind on UI_METRICS_PORT). The
+        # AST approach verifies imports resolve with zero side effects.
+        run: |
+          docker run --rm \
+            -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+            -e CHROMA_HOST -e CHROMA_PORT \
+            -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+            "$IMAGE" sh -c "cd /app/PredictionAgent && python -c '
+          import ast, importlib, sys
+          src = open(\"frontend/app.py\").read()
+          tree = ast.parse(src)
+          missing = []
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  for alias in node.names:
+                      top = alias.name.split(\".\")[0]
+                      try: importlib.import_module(top)
+                      except ImportError as e: missing.append((alias.name, str(e)))
+              elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                  top = node.module.split(\".\")[0]
+                  try: importlib.import_module(top)
+                  except ImportError as e: missing.append((node.module, str(e)))
+          if missing:
+              for m, e in missing: print(f\"FRONTEND IMPORT FAIL: {m} -> {e}\")
+              sys.exit(1)
+          print(\"FRONTEND IMPORTS OK\")
+          '"
+
       - name: Smoke 4 — Streamlit health endpoint
         run: |
           docker run -d --name nfs-smoke-ui --network host \
