@@ -1,0 +1,153 @@
+# Run the runtime smoke checks against an already-loaded Docker image.
+#
+# Caller responsibilities:
+#   - Image is in the runner's Docker daemon (built+loaded or pulled)
+#   - `services:` block declares Neo4j (port 7687) and Chroma (port 8000)
+#   - `env:` block sets NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD /
+#     CHROMA_HOST / CHROMA_PORT / OPENAI_API_KEY / GOOGLE_API_KEY
+#
+# This action is invoked by both .github/workflows/smoke-pr.yml (PR-time,
+# locally-built image) and .github/workflows/release-image.yml (post-publish,
+# GHCR-pulled image). Edit ONCE here — both pipelines pick it up.
+
+name: Run image smokes
+description: Wait-for-Chroma + 5 runtime smoke checks against a Docker image
+
+inputs:
+  image:
+    description: Docker image reference (must already be loaded in the daemon)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Wait for Chroma to be ready (heartbeat poll)
+      shell: bash
+      run: |
+        for i in $(seq 1 60); do
+          if curl -fsS http://localhost:8000/api/v2/heartbeat >/dev/null 2>&1 \
+             || curl -fsS http://localhost:8000/api/v1/heartbeat >/dev/null 2>&1; then
+            echo "Chroma is ready (after ${i} polls)"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "::error::Chroma did not become ready within 120s"
+        docker ps --filter "ancestor=chromadb/chroma:latest" --format '{{.ID}}' \
+          | xargs -r -I{} docker logs --tail 50 {}
+        exit 1
+
+    - name: Smoke 1 — imports work in the container
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        docker run --rm \
+          -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+          -e CHROMA_HOST -e CHROMA_PORT \
+          -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+          "$IMAGE" python -c "
+        from src.memory.agent import MemoryAgent
+        from agents.fact_check_agent import fact_check_claim
+        from agents.memory_agent import get_memory
+        print('IMPORT OK')
+        "
+
+    - name: Smoke 2 — schema init against sidecar Neo4j
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        docker run --rm --network host \
+          -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+          -e CHROMA_HOST -e CHROMA_PORT \
+          -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+          "$IMAGE" python -c "
+        from src.config import settings
+        from src.memory.agent import MemoryAgent
+        MemoryAgent(settings).init_schema()
+        print('SCHEMA OK')
+        "
+
+    - name: Smoke 3 — round-trip write/read on Neo4j + Chroma
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        docker run --rm --network host \
+          -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+          -e CHROMA_HOST -e CHROMA_PORT \
+          -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+          "$IMAGE" python -c "
+        from src.config import settings
+        from src.memory.agent import MemoryAgent
+        m = MemoryAgent(settings)
+        m._graph.ensure_entity_exists('SmokeTestEntity')
+        ent = m.get_entity_by_name('SmokeTestEntity')
+        assert ent is not None and ent['name'].lower() == 'smoketestentity', ent
+        print('ROUND-TRIP OK')
+        "
+
+    - name: Smoke 3.5 — frontend module imports
+      # Streamlit's /_stcore/health endpoint (Smoke 4 below) returns 200 as
+      # soon as the web server binds — BEFORE the user script's imports are
+      # evaluated. So a missing-from-requirements.txt import in app.py won't
+      # fail Smoke 4. This step closes that gap by AST-walking app.py and
+      # importing each top-level module inside the image.
+      #
+      # We intentionally avoid `python -c "import frontend.app"` because
+      # importing app.py runs module-level side effects (st.set_page_config,
+      # log-file handlers, prometheus server bind on UI_METRICS_PORT). The
+      # AST approach verifies imports resolve with zero side effects.
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        docker run --rm \
+          -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+          -e CHROMA_HOST -e CHROMA_PORT \
+          -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+          "$IMAGE" sh -c "cd /app/PredictionAgent && python -c '
+        import ast, importlib, sys
+        src = open(\"frontend/app.py\").read()
+        tree = ast.parse(src)
+        missing = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    top = alias.name.split(\".\")[0]
+                    try: importlib.import_module(top)
+                    except ImportError as e: missing.append((alias.name, str(e)))
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                top = node.module.split(\".\")[0]
+                try: importlib.import_module(top)
+                except ImportError as e: missing.append((node.module, str(e)))
+        if missing:
+            for m, e in missing: print(f\"FRONTEND IMPORT FAIL: {m} -> {e}\")
+            sys.exit(1)
+        print(\"FRONTEND IMPORTS OK\")
+        '"
+
+    - name: Smoke 4 — Streamlit health endpoint
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        docker run -d --name nfs-smoke-ui --network host \
+          -e NEO4J_URI -e NEO4J_USER -e NEO4J_PASSWORD \
+          -e CHROMA_HOST -e CHROMA_PORT \
+          -e OPENAI_API_KEY -e GOOGLE_API_KEY \
+          "$IMAGE" sh -c "cd /app/PredictionAgent && streamlit run frontend/app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true"
+
+        for i in $(seq 1 40); do
+          if curl -fsS http://localhost:8501/_stcore/health >/dev/null 2>&1; then
+            echo "STREAMLIT OK"
+            docker stop nfs-smoke-ui >/dev/null
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "::error::Streamlit failed to boot"
+        docker logs nfs-smoke-ui
+        docker stop nfs-smoke-ui >/dev/null
+        exit 1
