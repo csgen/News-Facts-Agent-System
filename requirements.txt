@@ -10,7 +10,7 @@ pydantic-settings>=2.3,<3.0
 python-dotenv>=1.0,<2.0
 
 # ── LLM (OpenAI + optional Ollama via OpenAI-compatible endpoint) ──────────
-openai>=2.0,<3.0
+openai>=2.33.0,<3.0
 
 # ── Google Gemini (embeddings on the default cloud path) ───────────────────
 google-genai>=0.8.0
