@@ -14,7 +14,7 @@ openai>=2.0,<3.0
 # ── LangGraph / LangChain (Task 2) ─────────────────────────────────────────────
 langgraph>=0.2
 langchain>=0.3
-langchain-openai>=0.1
+langchain-openai>=1.2.1
 langsmith>=0.1
 
 # ── Memory / Graph DB (Task 1) ─────────────────────────────────────────────────
