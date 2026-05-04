@@ -9,7 +9,7 @@ neo4j>=5.0,<6.0
 openai>=1.0,<2.0
 google-genai>=0.8.0
 langfuse>=2.0,<3.0
-rapidfuzz>=3.0,<4.0
+rapidfuzz>=3.14.5,<4.0
 numpy>=1.24,<3.0
 
 # Scraper Agent
