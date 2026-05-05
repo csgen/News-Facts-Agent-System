@@ -23,6 +23,7 @@ from fact_check_agent.src.graph.nodes import (
     emit_output,
     freshness_check_all,
     multi_agent_debate,
+    output_guardrail_node,
     query_memory,
     receive_claim,
     return_cached_verdict,
@@ -97,6 +98,7 @@ def build_graph(memory: "MemoryAgent"):
     _synthesize_verdict = _timed("synthesize_verdict", lambda s: synthesize_verdict(s, memory, settings))
     _multi_agent_debate = _timed("multi_agent_debate", lambda s: multi_agent_debate(s, memory, settings))
     _cross_modal_check = _timed("cross_modal_check", lambda s: cross_modal_check(s, settings))
+    _output_guardrail = _timed("output_guardrail", lambda s: output_guardrail_node(s, settings))
     _write_memory = _timed("write_memory", lambda s: write_memory(s, memory))
     _receive_claim = _timed("receive_claim", receive_claim)
     _emit_output = _timed("emit_output", emit_output)
@@ -116,6 +118,7 @@ def build_graph(memory: "MemoryAgent"):
     g.add_node("synthesize_verdict", _synthesize_verdict)
     g.add_node("multi_agent_debate", _multi_agent_debate)
     g.add_node("cross_modal_check", _cross_modal_check)
+    g.add_node("output_guardrail", _output_guardrail)
     g.add_node("write_memory", _write_memory)
     g.add_node("emit_output", _emit_output)
 
@@ -133,7 +136,7 @@ def build_graph(memory: "MemoryAgent"):
             "miss": "context_claim_agent",
         },
     )
-    g.add_edge("return_cached_verdict", "write_memory")
+    g.add_edge("return_cached_verdict", "output_guardrail")
     g.add_edge("context_claim_agent", "vlm_assessment")
     g.add_edge("vlm_assessment", "synthesize_verdict")
 
@@ -149,7 +152,8 @@ def build_graph(memory: "MemoryAgent"):
     g.add_edge("multi_agent_debate", "cross_modal_check")
 
     # Final path
-    g.add_edge("cross_modal_check", "write_memory")
+    g.add_edge("cross_modal_check", "output_guardrail")
+    g.add_edge("output_guardrail",  "write_memory")
     g.add_edge("write_memory", "emit_output")
     g.add_edge("emit_output", END)
 

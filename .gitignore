@@ -20,6 +20,9 @@ __pycache__/
 dist/
 build/
 .Python
+FakeNewsAgent/docs/*
+FakeNewsAgent/notebooks/*
+FakeNewsAgent/*.md
 
 # ── Virtual environments ─────────────────────────────────────────────────────
 .venv/
