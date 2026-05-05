@@ -959,6 +959,60 @@ def cross_modal_check(state: FactCheckState, settings) -> dict:
     }
 
 
+# ── Node: output_guardrail ───────────────────────────────────────────────────
+
+
+def output_guardrail_node(state: FactCheckState, settings=None) -> dict:
+    """Run toxicity, hallucination heuristic, and LLM grounding checks on the
+    generated reasoning before it is written to any DB.
+
+    Blocks on toxicity or ungrounded reasoning: calls log_failure() and returns
+    output=None so the pipeline produces no verdict — the frontend shows an
+    error banner to the user.  Hallucination heuristics warn only.
+    """
+    from fact_check_agent.src.agents.output_guardrail import run_output_guardrail
+
+    output: Optional[FactCheckOutput] = state.get("output")
+    if not output:
+        logger.warning("output_guardrail: no output in state — skipping")
+        return {}
+
+    claim_id = state["input"].claim_id
+    result = run_output_guardrail(
+        reasoning=output.reasoning,
+        claim_text=state["input"].claim_text,
+        context_claims=state.get("context_claims") or [],
+        client=_llm_factory.make_llm_client(),
+        model=_llm_factory.llm_model_name(),
+    )
+
+    if result["blocked"]:
+        logger.warning(
+            "output_guardrail: BLOCKED claim_id=%s reason=%s explanation=%s",
+            claim_id,
+            result["block_reason"],
+            result["grounding_explanation"],
+        )
+        log_failure(
+            memory=None,
+            claim_id=claim_id,
+            node_name="output_guardrail",
+            failure_type=f"output_guardrail_{result['block_reason']}",
+            exception=ValueError(
+                f"output blocked by guardrail: {result['block_reason']} — "
+                f"{result['grounding_explanation']}"
+            ),
+        )
+        return {"output": None}
+
+    logger.info(
+        "output_guardrail: PASS claim_id=%s hallucination_warnings=%s",
+        claim_id,
+        result["hallucination_warnings"],
+    )
+    return {}
+
+
 # ── Node: write_memory ────────────────────────────────────────────────────────
 
 
