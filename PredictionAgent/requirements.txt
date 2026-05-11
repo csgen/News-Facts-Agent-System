@@ -39,7 +39,7 @@ spacy>=3.7,<4.0
 # After install, download the model:  python -m spacy download en_core_web_sm
 
 # ── Cross-modal / Vision (Task 2 SOTA — optional) ──────────────────────────────
-transformers>=4.40
+transformers>=5.8.0
 torch>=2.2
 Pillow>=10.0
 
