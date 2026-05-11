@@ -47,7 +47,7 @@ lxml_html_clean>=0.1.0
 spacy>=3.7,<4.0
 
 # ── Cross-modal vision (FakeNewsAgent optional SigLIP / CLIP path) ─────────
-transformers>=4.40
+transformers>=5.8.0
 torch>=2.2
 Pillow>=10.0
 sentencepiece>=0.1.99
