@@ -49,7 +49,7 @@ spacy>=3.7,<4.0
 # ── Cross-modal vision (FakeNewsAgent optional SigLIP / CLIP path) ─────────
 transformers>=4.40
 torch>=2.2
-Pillow>=10.0
+Pillow>=12.2.0
 sentencepiece>=0.1.99
 
 # ── Frontend (PredictionAgent Streamlit UI) ────────────────────────────────
