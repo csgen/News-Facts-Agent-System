@@ -41,7 +41,7 @@ spacy>=3.7,<4.0
 # ── Cross-modal / Vision (Task 2 SOTA — optional) ──────────────────────────────
 transformers>=4.40
 torch>=2.2
-Pillow>=10.0
+Pillow>=12.2.0
 
 # ── Reranking (Task 2 — optional) ──────────────────────────────────────────────
 # sentence-transformers>=3.0   # uncomment to enable cross-encoder reranking
