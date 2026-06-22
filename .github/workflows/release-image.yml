@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -136,7 +136,7 @@ jobs:
       # Checkout is required so the runner can resolve the local composite
       # action at .github/actions/run-smokes/ — `uses: ./...` reads the
       # action.yml from the workspace, not the published image.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Compute image reference (lowercased + short SHA)
         # Two transforms vs the literal ${{ github.repository }}:sha-${{ github.sha }}:
